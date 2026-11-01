@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DeepLog Pro</string>
+    <string name="title_activity_main">DeepLog Pro</string>
+    <string name="package_name">com.deeplog.pro</string>
+    <string name="custom_url_scheme">com.deeplog.pro</string>
+</resources>
