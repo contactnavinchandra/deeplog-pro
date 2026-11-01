@@ -11,9 +11,9 @@ interface TopHeaderProps {
 const TAB_TITLES: Record<TabId, string> = {
   dives: 'Logbook',
   log: 'Log a Dive',
-  gear: 'Gear & Crew',
-  critters: 'Marine Life',
-  stats: 'Statistics & Gas',
+  gear: 'Gear & Buddies',
+  critters: 'Critter Dex',
+  stats: 'Statistics',
 };
 
 export const TopHeader: React.FC<TopHeaderProps> = ({

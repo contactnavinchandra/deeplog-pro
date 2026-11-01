@@ -25,6 +25,18 @@
     font-feature-settings: "zero" 0, "tnum" 1;
     font-style: normal !important;
   }
+
+  /* Remove up/down spin arrows on number inputs */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
 }
 
 /* Minimalist greyscale scrollbars */

@@ -7,26 +7,31 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  Folder,
 } from 'lucide-react';
 import {
   CritterFamilyMeta,
   CritterSpecies,
   DiveRecord,
+  DiveTrip,
   UnitSystem,
   VaultPhoto,
 } from '../types/dive';
 import { formatDepth, formatPressure, formatTemp } from '../utils/units';
+import { formatTripDateRange, formatTripTitle } from '../utils/trips';
 import { CritterSilhouette } from './CritterSilhouette';
 
 interface DiveInspectorProps {
   dive: DiveRecord;
+  trips: DiveTrip[];
+  onChangeDiveTrip?: (diveId: string, tripId: string | undefined) => void;
   coverPhoto: VaultPhoto;
   galleryPhotos: VaultPhoto[];
   unitSystem: UnitSystem;
   onUploadPhotoToDive: (diveId: string, file: File) => Promise<void>;
   speciesMap: Record<string, CritterSpecies>;
   familyMap: Record<string, CritterFamilyMeta>;
-  onInspectSpeciesInDex: (familyId: string) => void;
+  onInspectSpeciesInDex: (speciesId: string) => void;
   onBackToLogbook?: () => void;
   onPrevDive?: () => void;
   onNextDive?: () => void;
@@ -34,6 +39,8 @@ interface DiveInspectorProps {
 
 export const DiveInspector: React.FC<DiveInspectorProps> = ({
   dive,
+  trips,
+  onChangeDiveTrip,
   coverPhoto,
   galleryPhotos,
   unitSystem,
@@ -52,7 +59,8 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
   const displayedPhoto =
     galleryPhotos.find((p) => p.id === activePhotoId) || coverPhoto;
 
-  const totalCritterCount = dive.critters.reduce((acc, c) => acc + c.count, 0);
+  const totalCritterCount = dive.critters.length;
+  const assignedTrip = trips.find((t) => t.id === dive.tripId);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,7 +87,7 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-zinc-200 text-xs font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50"
           >
             <ChevronLeft className="w-4 h-4 text-zinc-500" />
-            <span>All Dives</span>
+            <span>Back</span>
           </button>
 
           <div className="flex items-center gap-1.5">
@@ -118,7 +126,7 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
               <img
                 src={displayedPhoto.vaultWebpDataUrl}
                 alt={dive.siteName}
-                className="w-full h-full object-cover object-center grayscale contrast-125"
+                className="w-full h-full object-cover object-center"
               />
             )}
 
@@ -158,7 +166,10 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
                 </h2>
                 <p className="text-xs text-zinc-300 flex items-center gap-1 mt-0.5 truncate">
                   <MapPin className="w-3.5 h-3.5 text-zinc-300 shrink-0" />
-                  <span>{dive.subLocation} • {dive.operator}</span>
+                  <span>
+                    {dive.subLocation}
+                    {assignedTrip ? ` • ${formatTripTitle(assignedTrip)}` : ' • Single Dive'}
+                  </span>
                 </p>
               </div>
 
@@ -178,7 +189,7 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
                       <img
                         src={photo.vaultWebpDataUrl}
                         alt=""
-                        className="w-full h-full object-cover grayscale"
+                        className="w-full h-full object-cover"
                       />
                     </button>
                   ))}
@@ -187,6 +198,34 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Trip Folder Assignment Bar (Move between trips or set as Standalone) */}
+        {onChangeDiveTrip && (
+          <div className="flex items-center justify-between gap-2 bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 shrink-0">
+              <Folder className="w-3.5 h-3.5 text-zinc-500" />
+              <span>Trip Folder</span>
+            </div>
+            <select
+              aria-label="Assign dive to trip"
+              value={dive.tripId || 'none'}
+              onChange={(e) =>
+                onChangeDiveTrip(
+                  dive.id,
+                  e.target.value === 'none' ? undefined : e.target.value
+                )
+              }
+              className="flex-1 max-w-[230px] bg-white border border-zinc-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-900 outline-none focus:border-zinc-900 truncate"
+            >
+              <option value="none">No Trip (Single Dive)</option>
+              {trips.map((trip) => (
+                <option key={trip.id} value={trip.id}>
+                  {formatTripTitle(trip)} ({formatTripDateRange(trip.startDate, trip.endDate)})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* 2. KEY DIVE TELEMETRY ROW (5 CLEAN METRIC CARDS) */}
         <div
@@ -213,7 +252,11 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
               {dive.bottomTimeMin}m
             </div>
             <div className="text-[9px] text-zinc-500 mt-0.5">
-              +{dive.safetyStopMin}m stop
+              {dive.safetyStopsCount !== undefined
+                ? dive.safetyStopsCount === 0
+                  ? 'No stop'
+                  : `${dive.safetyStopsCount} ${dive.safetyStopsCount === 1 ? 'stop' : 'stops'}`
+                : '1 stop'}
             </div>
           </div>
 
@@ -244,13 +287,13 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
 
           <div className="bg-zinc-50 border border-zinc-200/90 rounded-xl p-2 text-center">
             <div className="text-[9px] uppercase tracking-wider text-zinc-400 font-semibold">
-              Entry
+              Conditions
             </div>
             <div className="text-xs font-bold text-zinc-950 mt-0.5 leading-tight truncate">
-              {dive.entryType.split(' ')[0]}
+              {dive.dayNight ? `${dive.diveType} • ${dive.dayNight}` : dive.diveType}
             </div>
             <div className="text-[9px] text-zinc-500 mt-0.5 truncate">
-              {dive.current}
+              {dive.waterType || 'Salt'} • {dive.current}
             </div>
           </div>
         </div>
@@ -296,24 +339,16 @@ export const DiveInspector: React.FC<DiveInspectorProps> = ({
                   <button
                     key={sighted.speciesId}
                     type="button"
-                    onClick={() => onInspectSpeciesInDex(sp.familyId)}
+                    onClick={() => onInspectSpeciesInDex(sighted.speciesId)}
                     className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white hover:bg-zinc-100/80 border border-zinc-200 transition-all text-left"
                   >
                     <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 bg-zinc-50 text-zinc-900">
                       <CritterSilhouette familyId={sp.familyId} className="w-6 h-6" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-zinc-900 truncate">
-                          {sp.commonName}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800 border border-zinc-200 text-[10px] font-semibold shrink-0">
-                          ×{sighted.count}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 truncate mt-0.5">
-                        {sp.scientificName}
-                      </p>
+                      <span className="text-xs font-semibold text-zinc-900 truncate block">
+                        {sp.commonName}
+                      </span>
                     </div>
                   </button>
                 );

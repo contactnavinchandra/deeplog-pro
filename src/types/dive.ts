@@ -1,5 +1,7 @@
 export type UnitSystem = 'metric' | 'imperial';
 
+export type PhotoStorageMode = 'app-compressed' | 'phone-link';
+
 export type TabId = 'dives' | 'log' | 'gear' | 'critters' | 'stats';
 
 export type CritterFamilyId =
@@ -45,23 +47,51 @@ export interface VaultPhoto {
   diveNumber: number;
   caption: string;
   timestamp: string;
-  /** Private app sandbox WebP data URL (simulating Capacitor Directory.Data) */
   vaultWebpDataUrl: string;
-  /** Simulated phone OS gallery path (broken when user deletes phone gallery photos) */
   originalPhoneUri: string;
-  /** Original phone photo size in KB (e.g., 4200 KB HEIC/JPEG) */
   originalSizeKB: number;
-  /** Compressed WebP vault size in KB (~28-38 KB) */
   vaultSizeKB: number;
   width: number;
   height: number;
   isUserUploaded?: boolean;
+  storageMode?: PhotoStorageMode;
+}
+
+export interface DiveCertification {
+  id: string;
+  agency: string;
+  title: string;
+  certNumber?: string;
+  year?: string;
+}
+
+export interface GearCategory {
+  id: string;
+  name: string;
+  items: string[];
+}
+
+export interface DiveTrip {
+  id: string;
+  /** Destination / Trip Name, e.g., 'Bali', 'Raja Ampat', 'Phuket', 'Cairns' */
+  destination: string;
+  /** ISO date YYYY-MM-DD */
+  startDate: string;
+  /** ISO date YYYY-MM-DD */
+  endDate: string;
+  /** Dive buddies who are part of this trip */
+  buddies: string[];
+  /** Gear items packed/brought from the Gear Locker for this trip */
+  gearBrought?: string[];
 }
 
 export interface DiveRecord {
   id: string;
   diveNumber: number;
+  /** Optional trip folder ID. If undefined/empty, sits outside trips as a standalone/local dive */
+  tripId?: string;
   siteName: string;
+  /** Location / Region (e.g., 'Padang Bai, Bali' or 'Brisbane') */
   subLocation: string;
   operator: string;
   date: string;
@@ -76,8 +106,10 @@ export interface DiveRecord {
   o2Percent: number;
   waterTempC: number;
   visibilityM: number;
-  entryType: 'Jukung Outrigger' | 'Speedboat Roll' | 'Shore Entry' | 'Negative Drift';
-  current: 'Calm' | 'Mild' | 'Moderate' | 'Washing Machine';
+  diveType: 'Boat' | 'Shore';
+  dayNight?: 'Day' | 'Night';
+  waterType?: 'Salt' | 'Fresh';
+  current: 'Calm' | 'Mild' | 'Medium' | 'Moderate' | 'Strong';
   buddies: string[];
   diveGuide: string;
   gearUsed: string[];
@@ -87,4 +119,5 @@ export interface DiveRecord {
   photoIds: string[];
   computerModel: string;
   safetyStopMin: number;
+  safetyStopsCount?: number;
 }

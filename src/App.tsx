@@ -5,19 +5,23 @@ import {
   WifiOff,
   BatteryCharging,
   Signal,
-  X,
-  Check,
 } from 'lucide-react';
 import {
   CRITTER_FAMILIES,
   CRITTER_SPECIES,
   INITIAL_DIVES,
+  INITIAL_TRIPS,
   buildInitialVaultPhotos,
 } from './data/mockDives';
 import {
+  CritterFamilyId,
   CritterFamilyMeta,
   CritterSpecies,
+  DiveCertification,
   DiveRecord,
+  DiveTrip,
+  GearCategory,
+  PhotoStorageMode,
   SpottedCritter,
   TabId,
   UnitSystem,
@@ -27,6 +31,7 @@ import {
   compressPhotoToWebpVault,
   generateVaultWebpForDive,
 } from './utils/photoVault';
+import { formatTripDateRange, formatTripTitle } from './utils/trips';
 import { TopHeader } from './components/TopHeader';
 import { BottomNav } from './components/BottomNav';
 import { DiveListSidebar } from './components/DiveListSidebar';
@@ -35,16 +40,43 @@ import { CritterDexView } from './components/CritterDexView';
 import { LogDiveView } from './components/LogDiveView';
 import { GearAndCrewView } from './components/GearAndCrewView';
 import { StatsAndCalculatorsView } from './components/StatsAndCalculatorsView';
+import { SettingsModal } from './components/SettingsModal';
 
-const DEFAULT_GEAR_LOCKER = [
-  'Apeks XTX200',
-  'Shearwater Peregrine TX',
-  '5mm Fourth Element Proteus',
-  'Olympus TG-6 + Dual Inon',
-  'Olympus TG-6 + SMC-1 Supermacro',
-  'Reef Hook',
-  'SMB + Spool',
-  'BigBlue VL4600P Red Mode',
+const DEFAULT_GEAR_CATEGORIES: GearCategory[] = [
+  {
+    id: 'cat-photo',
+    name: 'Photography Gear',
+    items: [
+      'Olympus TG-6 + Dual Inon',
+      'Olympus TG-6 + SMC-1 Supermacro',
+      'Nikon Z6 II + 60mm Macro',
+    ],
+  },
+  {
+    id: 'cat-fins',
+    name: 'Fins',
+    items: ['Scubapro Seawing Nova', 'Mares Avanti Quattro+'],
+  },
+  {
+    id: 'cat-masks',
+    name: 'Masks',
+    items: ['Tusa Paragon S', 'Scubapro Frameless'],
+  },
+  {
+    id: 'cat-wetsuits',
+    name: 'Wetsuits',
+    items: ['5mm Fourth Element Proteus', '3mm Fourth Element Shorty'],
+  },
+  {
+    id: 'cat-computers-regs',
+    name: 'Computers & Regulators',
+    items: ['Shearwater Peregrine TX', 'Apeks XTX200'],
+  },
+  {
+    id: 'cat-torches-acc',
+    name: 'Dive Torches & Accessories',
+    items: ['BigBlue VL4600P Red Mode', 'Reef Hook', 'SMB + Spool'],
+  },
 ];
 
 const DEFAULT_BUDDY_POOL = [
@@ -53,18 +85,61 @@ const DEFAULT_BUDDY_POOL = [
   'Marcus Vance',
 ];
 
+const DEFAULT_CERTIFICATIONS: DiveCertification[] = [
+  {
+    id: 'cert-rescue',
+    agency: 'PADI',
+    title: 'Rescue Diver',
+    certNumber: '24089112',
+    year: '2024',
+  },
+  {
+    id: 'cert-nitrox',
+    agency: 'PADI',
+    title: 'Enriched Air (Nitrox)',
+    certNumber: '23110489',
+    year: '2023',
+  },
+  {
+    id: 'cert-aow',
+    agency: 'PADI',
+    title: 'Advanced Open Water Diver',
+    certNumber: '22051904',
+    year: '2022',
+  },
+];
+
 export function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dives');
   const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
+  const [initialDiveCount, setInitialDiveCount] = useState<number>(214);
+  const [photoStorageMode, setPhotoStorageMode] =
+    useState<PhotoStorageMode>('app-compressed');
   const [dives, setDives] = useState<DiveRecord[]>(INITIAL_DIVES);
+  const [trips, setTrips] = useState<DiveTrip[]>(INITIAL_TRIPS);
+  const [speciesList, setSpeciesList] =
+    useState<CritterSpecies[]>(CRITTER_SPECIES);
   const [selectedDiveId, setSelectedDiveId] = useState<string>(INITIAL_DIVES[0].id);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [dexFamilyFilter, setDexFamilyFilter] = useState<string>('all');
+  const [openedTripId, setOpenedTripId] = useState<string | null>(null);
+  const [critterSearchQuery, setCritterSearchQuery] = useState<string>('');
+  const [expandedSpeciesId, setExpandedSpeciesId] = useState<string | null>(null);
+  const [inspectorReturnTab, setInspectorReturnTab] = useState<TabId>('dives');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
-  const [gearLocker, setGearLocker] = useState<string[]>(DEFAULT_GEAR_LOCKER);
+  const [gearCategories, setGearCategories] = useState<GearCategory[]>(
+    DEFAULT_GEAR_CATEGORIES
+  );
   const [buddyPool, setBuddyPool] = useState<string[]>(DEFAULT_BUDDY_POOL);
+  const [certifications, setCertifications] = useState<DiveCertification[]>(
+    DEFAULT_CERTIFICATIONS
+  );
+
+  const flatGearLocker = useMemo(
+    () => gearCategories.flatMap((c) => c.items),
+    [gearCategories]
+  );
 
   const [devicePreviewMode, setDevicePreviewMode] = useState<'mobile' | 'tablet'>('mobile');
   // Start on the clean Logbook list; tapping a dive opens its detail view
@@ -76,11 +151,21 @@ export function App() {
 
   const speciesMap = useMemo(() => {
     const map: Record<string, CritterSpecies> = {};
-    for (const s of CRITTER_SPECIES) {
+    for (const s of speciesList) {
       map[s.id] = s;
     }
     return map;
-  }, []);
+  }, [speciesList]);
+
+  const loggedSpeciesCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const d of dives) {
+      for (const c of d.critters) {
+        if (c.count > 0) ids.add(c.speciesId);
+      }
+    }
+    return ids.size;
+  }, [dives]);
 
   const familyMap = useMemo(() => {
     const map: Record<string, CritterFamilyMeta> = {};
@@ -95,9 +180,11 @@ export function App() {
     if (!q) return dives;
 
     return dives.filter((dive) => {
+      const assignedTrip = trips.find((t) => t.id === dive.tripId);
       if (
         dive.siteName.toLowerCase().includes(q) ||
         dive.subLocation.toLowerCase().includes(q) ||
+        (assignedTrip && assignedTrip.destination.toLowerCase().includes(q)) ||
         dive.diveNumber.toString().includes(q) ||
         `#${dive.diveNumber}`.includes(q) ||
         dive.notes.toLowerCase().includes(q) ||
@@ -116,7 +203,7 @@ export function App() {
         );
       });
     });
-  }, [dives, searchQuery, speciesMap]);
+  }, [dives, trips, searchQuery, speciesMap]);
 
   const selectedDiveIndex = useMemo(
     () => Math.max(0, dives.findIndex((d) => d.id === selectedDiveId)),
@@ -125,31 +212,221 @@ export function App() {
 
   const selectedDive = dives[selectedDiveIndex] || dives[0];
 
+  // Highest dive number or initialDiveCount if no dives logged yet
+  const careerTotalDives = useMemo(() => {
+    if (dives.length === 0) return initialDiveCount;
+    return dives.reduce(
+      (max, d) => (d.diveNumber > max ? d.diveNumber : max),
+      initialDiveCount
+    );
+  }, [dives, initialDiveCount]);
+
   useEffect(() => {
     if (!toastMessage) return;
     const timer = setTimeout(() => setToastMessage(null), 3500);
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
+  const handleChangeInitialDiveCount = (newInitialCount: number) => {
+    const safeCount = Math.max(0, Math.floor(newInitialCount));
+    setInitialDiveCount(safeCount);
+
+    // Re-number all existing dives in chronological order starting at safeCount + 1
+    setDives((prev) => {
+      const chronological = [...prev].sort((a, b) => {
+        const dateCmp = a.date.localeCompare(b.date);
+        if (dateCmp !== 0) return dateCmp;
+        const timeCmp = a.timeIn.localeCompare(b.timeIn);
+        if (timeCmp !== 0) return timeCmp;
+        return a.diveNumber - b.diveNumber;
+      });
+
+      const numberById = new Map<string, number>();
+      chronological.forEach((d, idx) => {
+        numberById.set(d.id, safeCount + idx + 1);
+      });
+
+      return prev
+        .map((d) => ({
+          ...d,
+          diveNumber: numberById.get(d.id) ?? d.diveNumber,
+        }))
+        .sort((a, b) => b.diveNumber - a.diveNumber);
+    });
+
+    setToastMessage(
+      `Initial dives set to ${safeCount} (App dives start at #${safeCount + 1})`
+    );
+  };
+
+  const handleAddCertification = (cert: Omit<DiveCertification, 'id'>) => {
+    const created: DiveCertification = {
+      ...cert,
+      id: `cert-${Date.now()}`,
+    };
+    setCertifications((prev) => [created, ...prev]);
+    setToastMessage(`Added ${cert.agency} ${cert.title}`);
+  };
+
+  const handleRemoveCertification = (id: string) => {
+    setCertifications((prev) => prev.filter((c) => c.id !== id));
+    setToastMessage('Removed certification');
+  };
+
+  const handleAddGearCategory = (categoryName: string) => {
+    const newCat: GearCategory = {
+      id: `cat-${categoryName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
+      name: categoryName,
+      items: [],
+    };
+    setGearCategories((prev) => [...prev, newCat]);
+    setToastMessage(`Created category: ${categoryName}`);
+  };
+
+  const handleRemoveGearCategory = (categoryId: string) => {
+    setGearCategories((prev) => prev.filter((c) => c.id !== categoryId));
+    setToastMessage('Removed gear category');
+  };
+
+  const handleAddGearItemToCategory = (
+    categoryId: string,
+    itemName: string
+  ) => {
+    setGearCategories((prev) =>
+      prev.map((cat) => {
+        if (cat.id !== categoryId) return cat;
+        if (cat.items.includes(itemName)) return cat;
+        return {
+          ...cat,
+          items: [...cat.items, itemName],
+        };
+      })
+    );
+    setToastMessage(`Added ${itemName}`);
+  };
+
+  const handleRemoveGearItemFromCategory = (
+    categoryId: string,
+    itemName: string
+  ) => {
+    setGearCategories((prev) =>
+      prev.map((cat) =>
+        cat.id === categoryId
+          ? { ...cat, items: cat.items.filter((i) => i !== itemName) }
+          : cat
+      )
+    );
+  };
+
+  const handleCreateTrip = (
+    destination: string,
+    startDate: string,
+    endDate: string,
+    buddies: string[] = [],
+    gearBrought: string[] = []
+  ): DiveTrip => {
+    const newTrip: DiveTrip = {
+      id: `trip-${destination.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
+      destination,
+      startDate,
+      endDate,
+      buddies,
+      gearBrought,
+    };
+
+    setTrips((prev) => [newTrip, ...prev]);
+
+    // Ensure any trip buddies are also in the global buddy pool
+    if (buddies.length > 0) {
+      setBuddyPool((prev) => Array.from(new Set([...prev, ...buddies])));
+    }
+
+    // Automatically place any existing single dives within this date range into the new trip
+    setDives((prev) =>
+      prev.map((d) => {
+        if (!d.tripId && d.date >= startDate && d.date <= endDate) {
+          return { ...d, tripId: newTrip.id };
+        }
+        return d;
+      })
+    );
+
+    setToastMessage(
+      `Created trip: ${formatTripTitle(newTrip)} (${formatTripDateRange(startDate, endDate)})`
+    );
+    return newTrip;
+  };
+
+  const handleUpdateTripBuddies = (tripId: string, buddies: string[]) => {
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, buddies } : t))
+    );
+    setBuddyPool((prev) => Array.from(new Set([...prev, ...buddies])));
+  };
+
+  const handleUpdateTripGear = (tripId: string, gearBrought: string[]) => {
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, gearBrought } : t))
+    );
+  };
+
+  const handleRemoveBuddyFromPool = (buddy: string) => {
+    setBuddyPool((prev) => prev.filter((b) => b !== buddy));
+    setToastMessage(`Removed ${buddy} from buddies`);
+  };
+
+  const handleChangeDiveTrip = (diveId: string, tripId: string | undefined) => {
+    setDives((prev) =>
+      prev.map((d) => (d.id === diveId ? { ...d, tripId } : d))
+    );
+    const targetTrip = trips.find((t) => t.id === tripId);
+    setToastMessage(
+      targetTrip
+        ? `Moved dive to ${formatTripTitle(targetTrip)}`
+        : 'Set as Single Dive'
+    );
+  };
+
   const handleUploadPhotoToDive = async (diveId: string, file: File) => {
     const targetDive = dives.find((d) => d.id === diveId);
     if (!targetDive) return;
 
-    const compressed = await compressPhotoToWebpVault(file, 35);
     const newPhotoId = `photo-upload-${Date.now()}`;
-    const newVaultPhoto: VaultPhoto = {
-      id: newPhotoId,
-      diveNumber: targetDive.diveNumber,
-      caption: `${targetDive.siteName} — Dive #${targetDive.diveNumber}`,
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      vaultWebpDataUrl: compressed.webpDataUrl,
-      originalPhoneUri: `content://media/external/images/media/${file.name}`,
-      originalSizeKB: compressed.originalSizeKB,
-      vaultSizeKB: compressed.vaultSizeKB,
-      width: compressed.width,
-      height: compressed.height,
-      isUserUploaded: true,
-    };
+    let newVaultPhoto: VaultPhoto;
+
+    if (photoStorageMode === 'app-compressed') {
+      const compressed = await compressPhotoToWebpVault(file, 35);
+      newVaultPhoto = {
+        id: newPhotoId,
+        diveNumber: targetDive.diveNumber,
+        caption: `${targetDive.siteName} — Dive #${targetDive.diveNumber}`,
+        timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        vaultWebpDataUrl: compressed.webpDataUrl,
+        originalPhoneUri: `content://media/external/images/media/${file.name}`,
+        originalSizeKB: compressed.originalSizeKB,
+        vaultSizeKB: compressed.vaultSizeKB,
+        width: compressed.width,
+        height: compressed.height,
+        isUserUploaded: true,
+        storageMode: 'app-compressed',
+      };
+    } else {
+      const objectUrl = URL.createObjectURL(file);
+      newVaultPhoto = {
+        id: newPhotoId,
+        diveNumber: targetDive.diveNumber,
+        caption: `${targetDive.siteName} — Dive #${targetDive.diveNumber}`,
+        timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        vaultWebpDataUrl: objectUrl,
+        originalPhoneUri: `content://media/external/images/media/${file.name}`,
+        originalSizeKB: Math.max(1, Math.round(file.size / 1024)),
+        vaultSizeKB: 0,
+        width: 800,
+        height: 600,
+        isUserUploaded: true,
+        storageMode: 'phone-link',
+      };
+    }
 
     setVaultPhotos((prev) => ({
       ...prev,
@@ -180,20 +457,39 @@ export function App() {
 
     let vaultPhotoEntry: VaultPhoto;
     if (uploadedFile) {
-      const compressed = await compressPhotoToWebpVault(uploadedFile, 35);
-      vaultPhotoEntry = {
-        id: photoId,
-        diveNumber: newDiveData.diveNumber,
-        caption: `${newDiveData.siteName} — Dive #${newDiveData.diveNumber}`,
-        timestamp: `${newDiveData.date} ${newDiveData.timeIn}`,
-        vaultWebpDataUrl: compressed.webpDataUrl,
-        originalPhoneUri: `content://media/external/images/media/${uploadedFile.name}`,
-        originalSizeKB: compressed.originalSizeKB,
-        vaultSizeKB: compressed.vaultSizeKB,
-        width: compressed.width,
-        height: compressed.height,
-        isUserUploaded: true,
-      };
+      if (photoStorageMode === 'app-compressed') {
+        const compressed = await compressPhotoToWebpVault(uploadedFile, 35);
+        vaultPhotoEntry = {
+          id: photoId,
+          diveNumber: newDiveData.diveNumber,
+          caption: `${newDiveData.siteName} — Dive #${newDiveData.diveNumber}`,
+          timestamp: `${newDiveData.date} ${newDiveData.timeIn}`,
+          vaultWebpDataUrl: compressed.webpDataUrl,
+          originalPhoneUri: `content://media/external/images/media/${uploadedFile.name}`,
+          originalSizeKB: compressed.originalSizeKB,
+          vaultSizeKB: compressed.vaultSizeKB,
+          width: compressed.width,
+          height: compressed.height,
+          isUserUploaded: true,
+          storageMode: 'app-compressed',
+        };
+      } else {
+        const objectUrl = URL.createObjectURL(uploadedFile);
+        vaultPhotoEntry = {
+          id: photoId,
+          diveNumber: newDiveData.diveNumber,
+          caption: `${newDiveData.siteName} — Dive #${newDiveData.diveNumber}`,
+          timestamp: `${newDiveData.date} ${newDiveData.timeIn}`,
+          vaultWebpDataUrl: objectUrl,
+          originalPhoneUri: `content://media/external/images/media/${uploadedFile.name}`,
+          originalSizeKB: Math.max(1, Math.round(uploadedFile.size / 1024)),
+          vaultSizeKB: 0,
+          width: 800,
+          height: 600,
+          isUserUploaded: true,
+          storageMode: 'phone-link',
+        };
+      }
     } else {
       const generated = generateVaultWebpForDive(222);
       vaultPhotoEntry = {
@@ -207,6 +503,7 @@ export function App() {
         vaultSizeKB: generated.vaultSizeKB,
         width: generated.width,
         height: generated.height,
+        storageMode: 'app-compressed',
       };
     }
 
@@ -226,7 +523,12 @@ export function App() {
     setSelectedDiveId(diveId);
     setMobileDivesSubView('inspector');
     setActiveTab('dives');
-    setToastMessage(`Logged Dive #${newDiveData.diveNumber} (${newDiveData.siteName})`);
+    const assignedTrip = trips.find((t) => t.id === completeDive.tripId);
+    setToastMessage(
+      assignedTrip
+        ? `Logged Dive #${newDiveData.diveNumber} into ${formatTripTitle(assignedTrip)}`
+        : `Logged Single Dive #${newDiveData.diveNumber} (${newDiveData.siteName})`
+    );
   };
 
   const handleMergeCritterDelta = (
@@ -262,13 +564,119 @@ export function App() {
     setToastMessage(`Merged ${buddyName}’s sightings`);
   };
 
-  const handleInspectSpeciesInDex = (familyId: string) => {
-    setDexFamilyFilter(familyId);
+  const handleConvertLinkedPhotosToApp = () => {
+    setVaultPhotos((prev) => {
+      const next: Record<string, VaultPhoto> = {};
+      for (const [id, photo] of Object.entries(prev)) {
+        if (photo.storageMode === 'phone-link') {
+          next[id] = {
+            ...photo,
+            storageMode: 'app-compressed',
+            vaultSizeKB: 34,
+          };
+        } else {
+          next[id] = photo;
+        }
+      }
+      return next;
+    });
+    setToastMessage('Compressed phone-linked photos into app data');
+  };
+
+  const handleExportBackup = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      unitSystem,
+      initialDiveCount,
+      photoStorageMode,
+      trips,
+      dives,
+      buddyPool,
+      gearCategories,
+      certifications,
+      vaultPhotos,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deeplog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setToastMessage('Exported logbook & photo backup file');
+  };
+
+  const handleImportBackup = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (Array.isArray(parsed.dives)) setDives(parsed.dives);
+        if (Array.isArray(parsed.trips)) setTrips(parsed.trips);
+        if (Array.isArray(parsed.buddyPool)) setBuddyPool(parsed.buddyPool);
+        if (Array.isArray(parsed.gearCategories)) {
+          setGearCategories(parsed.gearCategories);
+        }
+        if (Array.isArray(parsed.certifications)) {
+          setCertifications(parsed.certifications);
+        }
+        if (typeof parsed.initialDiveCount === 'number') {
+          setInitialDiveCount(parsed.initialDiveCount);
+        }
+        if (parsed.vaultPhotos && typeof parsed.vaultPhotos === 'object') {
+          setVaultPhotos(parsed.vaultPhotos);
+        }
+        if (parsed.unitSystem === 'metric' || parsed.unitSystem === 'imperial') {
+          setUnitSystem(parsed.unitSystem);
+        }
+        if (
+          parsed.photoStorageMode === 'app-compressed' ||
+          parsed.photoStorageMode === 'phone-link'
+        ) {
+          setPhotoStorageMode(parsed.photoStorageMode);
+        }
+        setToastMessage('Restored logbook backup');
+      } catch {
+        setToastMessage('Invalid backup file');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleCreateSpecies = (
+    commonName: string,
+    familyId: CritterFamilyId
+  ): CritterSpecies => {
+    const existing = speciesList.find(
+      (s) => s.commonName.toLowerCase() === commonName.toLowerCase()
+    );
+    if (existing) return existing;
+
+    const created: CritterSpecies = {
+      id: `sp-custom-${Date.now()}`,
+      commonName,
+      scientificName: '',
+      familyId,
+      rarity: 'Common',
+      typicalDepthM: '',
+      habitat: '',
+      description: '',
+    };
+    setSpeciesList((prev) => [created, ...prev]);
+    return created;
+  };
+
+  const handleInspectSpeciesInDex = (speciesId: string) => {
+    setExpandedSpeciesId(speciesId);
     setActiveTab('critters');
   };
 
   const handleSelectDiveFromDex = (diveId: string) => {
     setSelectedDiveId(diveId);
+    setInspectorReturnTab('critters');
     setMobileDivesSubView('inspector');
     setActiveTab('dives');
   };
@@ -345,7 +753,7 @@ export function App() {
         {/* Clean Top App Header */}
         <TopHeader
           activeTab={activeTab}
-          latestDiveNumber={dives[0]?.diveNumber || 222}
+          latestDiveNumber={careerTotalDives}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
@@ -371,19 +779,31 @@ export function App() {
                 mobileDivesSubView === 'list' ? (
                   <DiveListSidebar
                     dives={filteredDives}
+                    trips={trips}
+                    buddyPool={buddyPool}
+                    gearCategories={gearCategories}
                     selectedDiveId={selectedDive.id}
                     onSelectDive={(id) => {
                       setSelectedDiveId(id);
+                      setInspectorReturnTab('dives');
                       setMobileDivesSubView('inspector');
                     }}
                     searchQuery={searchQuery}
                     onSearchChange={setSearchQuery}
                     unitSystem={unitSystem}
                     vaultPhotos={vaultPhotos}
+                    onCreateTrip={handleCreateTrip}
+                    onUpdateTripBuddies={handleUpdateTripBuddies}
+                    onUpdateTripGear={handleUpdateTripGear}
+                    openedTripId={openedTripId}
+                    onOpenTrip={setOpenedTripId}
+                    careerTotalDives={careerTotalDives}
                   />
                 ) : (
                   <DiveInspector
                     dive={selectedDive}
+                    trips={trips}
+                    onChangeDiveTrip={handleChangeDiveTrip}
                     coverPhoto={coverPhoto}
                     galleryPhotos={galleryPhotos}
                     unitSystem={unitSystem}
@@ -391,7 +811,13 @@ export function App() {
                     speciesMap={speciesMap}
                     familyMap={familyMap}
                     onInspectSpeciesInDex={handleInspectSpeciesInDex}
-                    onBackToLogbook={() => setMobileDivesSubView('list')}
+                    onBackToLogbook={() => {
+                      if (inspectorReturnTab !== 'dives') {
+                        setActiveTab(inspectorReturnTab);
+                      } else {
+                        setMobileDivesSubView('list');
+                      }
+                    }}
                     onPrevDive={
                       selectedDiveIndex < dives.length - 1
                         ? () => setSelectedDiveId(dives[selectedDiveIndex + 1].id)
@@ -410,17 +836,26 @@ export function App() {
                   <div className="lg:col-span-5">
                     <DiveListSidebar
                       dives={filteredDives}
+                      trips={trips}
+                      buddyPool={buddyPool}
+                      gearCategories={gearCategories}
                       selectedDiveId={selectedDive.id}
                       onSelectDive={setSelectedDiveId}
                       searchQuery={searchQuery}
                       onSearchChange={setSearchQuery}
                       unitSystem={unitSystem}
                       vaultPhotos={vaultPhotos}
+                      onCreateTrip={handleCreateTrip}
+                      onUpdateTripBuddies={handleUpdateTripBuddies}
+                      onUpdateTripGear={handleUpdateTripGear}
+                      careerTotalDives={careerTotalDives}
                     />
                   </div>
                   <div className="lg:col-span-7">
                     <DiveInspector
                       dive={selectedDive}
+                      trips={trips}
+                      onChangeDiveTrip={handleChangeDiveTrip}
                       coverPhoto={coverPhoto}
                       galleryPhotos={galleryPhotos}
                       unitSystem={unitSystem}
@@ -438,9 +873,19 @@ export function App() {
           {activeTab === 'log' && (
             <LogDiveView
               latestDive={dives[0]}
-              allSpecies={CRITTER_SPECIES}
-              gearLocker={gearLocker}
+              nextDiveNumber={careerTotalDives + 1}
+              trips={trips}
+              onCreateTrip={handleCreateTrip}
+              onUpdateTripBuddies={handleUpdateTripBuddies}
+              allSpecies={speciesList}
+              families={CRITTER_FAMILIES}
+              onCreateSpecies={handleCreateSpecies}
+              gearCategories={gearCategories}
               buddyPool={buddyPool}
+              onAddBuddyToPool={(b) =>
+                setBuddyPool((prev) => (prev.includes(b) ? prev : [...prev, b]))
+              }
+              onRemoveBuddyFromPool={handleRemoveBuddyFromPool}
               unitSystem={unitSystem}
               onSaveNewDive={handleSaveNewDive}
             />
@@ -449,31 +894,39 @@ export function App() {
           {activeTab === 'gear' && (
             <GearAndCrewView
               dives={dives}
-              selectedDiveId={selectedDive.id}
-              onSelectDiveId={setSelectedDiveId}
-              allSpecies={CRITTER_SPECIES}
-              gearLocker={gearLocker}
-              onAddGearItem={(item) =>
-                setGearLocker((prev) => (prev.includes(item) ? prev : [...prev, item]))
-              }
-              onRemoveGearItem={(item) =>
-                setGearLocker((prev) => prev.filter((g) => g !== item))
-              }
+              certifications={certifications}
+              onAddCertification={handleAddCertification}
+              onRemoveCertification={handleRemoveCertification}
+              gearCategories={gearCategories}
+              onAddGearCategory={handleAddGearCategory}
+              onRemoveGearCategory={handleRemoveGearCategory}
+              onAddGearItemToCategory={handleAddGearItemToCategory}
+              onRemoveGearItemFromCategory={handleRemoveGearItemFromCategory}
               buddyPool={buddyPool}
               onAddBuddyToPool={(b) =>
                 setBuddyPool((prev) => (prev.includes(b) ? prev : [...prev, b]))
               }
-              onMergeCritterDelta={handleMergeCritterDelta}
-              unitSystem={unitSystem}
+              onRemoveBuddyFromPool={handleRemoveBuddyFromPool}
             />
           )}
 
           {activeTab === 'critters' && (
             <CritterDexView
               families={CRITTER_FAMILIES}
-              species={CRITTER_SPECIES}
+              species={speciesList}
               dives={dives}
-              initialFamilyFilter={dexFamilyFilter}
+              selectedDiveId={selectedDive.id}
+              onSelectDiveId={setSelectedDiveId}
+              onMergeCritterDelta={handleMergeCritterDelta}
+              unitSystem={unitSystem}
+              searchQuery={critterSearchQuery}
+              onSearchChange={setCritterSearchQuery}
+              expandedSpeciesId={expandedSpeciesId}
+              onToggleExpandedSpecies={(speciesId) =>
+                setExpandedSpeciesId((prev) =>
+                  prev === speciesId ? null : speciesId
+                )
+              }
               onSelectDiveFromDex={handleSelectDiveFromDex}
             />
           )}
@@ -484,6 +937,7 @@ export function App() {
               unitSystem={unitSystem}
               onSelectDive={(id) => {
                 setSelectedDiveId(id);
+                setInspectorReturnTab('stats');
                 setMobileDivesSubView('inspector');
                 setActiveTab('dives');
               }}
@@ -501,7 +955,7 @@ export function App() {
             }
           }}
           diveCount={dives.length}
-          critterSpeciesCount={CRITTER_SPECIES.length}
+          critterSpeciesCount={loggedSpeciesCount}
         />
 
         {/* Simulated Samsung One UI 3-Button System Navigation Bar (Desktop preview only) */}
@@ -517,84 +971,32 @@ export function App() {
           </div>
         )}
 
-        {/* Settings Sheet (Measurement Units & Preferences) */}
+        {/* Settings Sheet (Initial Dives + Data & Storage + Measurement Units) */}
         {isSettingsOpen && (
-          <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
-            <div className="w-full bg-white rounded-t-3xl border-t border-zinc-200 p-5 space-y-4 shadow-2xl">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-zinc-950">
-                  Preferences & Units
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setIsSettingsOpen(false)}
-                  className="w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-600"
-                  aria-label="Close settings"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                  Measurement System
-                </label>
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setUnitSystem('metric')}
-                    className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all ${
-                      unitSystem === 'metric'
-                        ? 'bg-zinc-950 text-white border-zinc-950'
-                        : 'bg-zinc-50 text-zinc-900 border-zinc-200'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-sm font-bold">Metric</div>
-                      <div
-                        className={`text-xs mt-0.5 ${
-                          unitSystem === 'metric' ? 'text-zinc-300' : 'text-zinc-500'
-                        }`}
-                      >
-                        Meters (m) • Bar • Celsius (°C) • Liters
-                      </div>
-                    </div>
-                    {unitSystem === 'metric' && <Check className="w-4 h-4" />}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setUnitSystem('imperial')}
-                    className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all ${
-                      unitSystem === 'imperial'
-                        ? 'bg-zinc-950 text-white border-zinc-950'
-                        : 'bg-zinc-50 text-zinc-900 border-zinc-200'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-sm font-bold">Imperial</div>
-                      <div
-                        className={`text-xs mt-0.5 ${
-                          unitSystem === 'imperial' ? 'text-zinc-300' : 'text-zinc-500'
-                        }`}
-                      >
-                        Feet (ft) • PSI • Fahrenheit (°F) • Cubic Feet
-                      </div>
-                    </div>
-                    {unitSystem === 'imperial' && <Check className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsSettingsOpen(false)}
-                className="w-full py-3 rounded-2xl bg-zinc-900 text-white text-xs font-bold"
-              >
-                Done
-              </button>
-            </div>
-          </div>
+          <SettingsModal
+            unitSystem={unitSystem}
+            onChangeUnitSystem={setUnitSystem}
+            initialDiveCount={initialDiveCount}
+            onChangeInitialDiveCount={handleChangeInitialDiveCount}
+            photoStorageMode={photoStorageMode}
+            onChangePhotoStorageMode={(mode) => {
+              setPhotoStorageMode(mode);
+              setToastMessage(
+                mode === 'app-compressed'
+                  ? 'Photos will be compressed & stored safely in app data'
+                  : 'Photos will reference your phone gallery only'
+              );
+            }}
+            dives={dives}
+            trips={trips}
+            buddyPool={buddyPool}
+            gearLocker={flatGearLocker}
+            vaultPhotos={vaultPhotos}
+            onConvertLinkedPhotosToApp={handleConvertLinkedPhotosToApp}
+            onExportBackup={handleExportBackup}
+            onImportBackup={handleImportBackup}
+            onClose={() => setIsSettingsOpen(false)}
+          />
         )}
       </div>
     </div>
@@ -602,3 +1004,4 @@ export function App() {
 }
 
 export default App;
+

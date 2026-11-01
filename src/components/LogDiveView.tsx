@@ -1,36 +1,55 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   CheckSquare,
   Square,
-  Sparkles,
   Upload,
-  Plus,
-  Minus,
-  AlertTriangle,
   Check,
-  Wand2,
-  ShieldCheck,
+  FolderPlus,
+  Folder,
+  Users,
+  Wrench,
+  Droplets,
+  Gauge,
+  X,
 } from 'lucide-react';
 import {
+  CritterFamilyId,
+  CritterFamilyMeta,
   CritterSpecies,
   DiveRecord,
+  DiveTrip,
+  GearCategory,
   SpottedCritter,
   UnitSystem,
 } from '../types/dive';
+import { scanNotesForCritters } from '../utils/diveCalculators';
 import {
-  calculateEadMeters,
-  calculateModMeters,
-  calculateSacAndRmv,
-  scanNotesForCritters,
-} from '../utils/diveCalculators';
+  findMatchingTripForDate,
+  formatTripDateRange,
+  formatTripTitle,
+} from '../utils/trips';
 import { formatDepth, formatPressure, formatTemp } from '../utils/units';
 import { CritterSilhouette } from './CritterSilhouette';
 
 interface LogDiveViewProps {
   latestDive: DiveRecord;
+  nextDiveNumber?: number;
+  trips: DiveTrip[];
+  onCreateTrip: (
+    destination: string,
+    startDate: string,
+    endDate: string,
+    buddies: string[],
+    gearBrought: string[]
+  ) => DiveTrip;
+  onUpdateTripBuddies?: (tripId: string, buddies: string[]) => void;
   allSpecies: CritterSpecies[];
-  gearLocker: string[];
+  families?: CritterFamilyMeta[];
+  onCreateSpecies?: (commonName: string, familyId: CritterFamilyId) => CritterSpecies;
+  gearCategories: GearCategory[];
   buddyPool: string[];
+  onAddBuddyToPool?: (buddy: string) => void;
+  onRemoveBuddyFromPool?: (buddy: string) => void;
   unitSystem: UnitSystem;
   onSaveNewDive: (
     newDive: Omit<DiveRecord, 'id' | 'coverPhotoId' | 'photoIds'>,
@@ -38,97 +57,229 @@ interface LogDiveViewProps {
   ) => Promise<void>;
 }
 
-const BALI_SITE_PRESETS = [
-  { site: 'Manta Point & Cleaning Station', sub: 'Nusa Penida, Bali' },
-  { site: 'Crystal Bay Corner', sub: 'Nusa Penida, Bali' },
-  { site: 'Amed Pyramids & Deep Wall', sub: 'Amed Coast, East Bali' },
-  { site: 'Blue Lagoon Jetty Night Muck', sub: 'Padang Bai, East Bali' },
-];
-
-const SAMPLE_SCANNER_NOTES = [
-  'Dropped onto the cleaning station at 21m. Spotted 2 hairy frogfish on a sponge, a wonderpus hunting over black sand, and 3 pygmy seahorses on a gorgonian fan! Finished safety stop with a hawksbill turtle.',
-  'Strong thermocline roll at 24m. Wayan found a flamboyant cuttlefish walking on the slope, 2 pikachu nudibranchs, and 4 shaun the sheep leaf slugs on green algae.',
-];
-
 export const LogDiveView: React.FC<LogDiveViewProps> = ({
   latestDive,
+  nextDiveNumber: explicitNextDiveNumber,
+  trips,
+  onCreateTrip,
+  onUpdateTripBuddies,
   allSpecies,
-  gearLocker,
+  families = [],
+  onCreateSpecies,
+  gearCategories,
   buddyPool,
+  onAddBuddyToPool,
+  onRemoveBuddyFromPool,
   unitSystem,
   onSaveNewDive,
 }) => {
-  const nextDiveNumber = latestDive.diveNumber + 1;
+  const nextDiveNumber = explicitNextDiveNumber ?? latestDive.diveNumber + 1;
 
-  // Core Dive Details
-  const [siteName, setSiteName] = useState('Manta Point & Cleaning Station');
-  const [subLocation, setSubLocation] = useState('Nusa Penida, Bali');
-  const [operator, setOperator] = useState(latestDive.operator);
-  const [date, setDate] = useState('2026-10-31');
+  // Date & Time
+  const [date, setDate] = useState('2026-10-30');
   const [timeIn, setTimeIn] = useState('09:30');
 
-  // Depth, Time, Gas, Temp (stored internally in Metric, displayed with unitSystem)
-  const [maxDepthM, setMaxDepthM] = useState(23.6);
-  const [avgDepthM, setAvgDepthM] = useState(15.2);
-  const [bottomTimeMin, setBottomTimeMin] = useState(56);
-  const [safetyStopMin, setSafetyStopMin] = useState(5);
-  const [o2Percent, setO2Percent] = useState(32);
-  const [startPressureBar, setStartPressureBar] = useState(205);
-  const [endPressureBar, setEndPressureBar] = useState(55);
-  const [tankVolumeL, setTankVolumeL] = useState(12);
-  const [waterTempC, setWaterTempC] = useState(26);
-  const [visibilityM, setVisibilityM] = useState(20);
-  const [entryType, setEntryType] = useState<DiveRecord['entryType']>('Jukung Outrigger');
-  const [current, setCurrent] = useState<DiveRecord['current']>('Mild');
+  // Trip selection: auto-match if initial date falls inside an existing trip, otherwise '' (Single Dive)
+  const initialMatchedTrip = findMatchingTripForDate('2026-10-30', trips);
+  const [selectedTripId, setSelectedTripId] = useState<string>(
+    initialMatchedTrip ? initialMatchedTrip.id : ''
+  );
+  const [wasAutoMatched, setWasAutoMatched] = useState<boolean>(
+    Boolean(initialMatchedTrip)
+  );
 
-  // 1-Tap "Same Buddies as Last Dive" & Gear Locker Tick-boxes
+  // Inline "Create a Trip" modal/drawer state
+  const [isCreatingTrip, setIsCreatingTrip] = useState(false);
+  const [newTripDestination, setNewTripDestination] = useState('Bali');
+  const [newTripStart, setNewTripStart] = useState('2026-11-10');
+  const [newTripEnd, setNewTripEnd] = useState('2026-11-20');
+  const [newTripBuddies, setNewTripBuddies] = useState<string[]>(
+    latestDive.buddies
+  );
+  const [newTripGear, setNewTripGear] = useState<string[]>(
+    latestDive.gearUsed
+  );
+  const [newTripCustomBuddy, setNewTripCustomBuddy] = useState('');
+  const [showFullLockerOnTrip, setShowFullLockerOnTrip] = useState(false);
+
+  // Dive Site & Location
+  const [siteName, setSiteName] = useState('');
+  const [subLocation, setSubLocation] = useState(
+    initialMatchedTrip ? initialMatchedTrip.destination : ''
+  );
+
+  // Compact Entry Type & Day/Night toggles
+  const [diveType, setDiveType] = useState<'Boat' | 'Shore'>(
+    latestDive.diveType || 'Boat'
+  );
+  const [dayNight, setDayNight] = useState<'Day' | 'Night'>(
+    latestDive.dayNight || 'Day'
+  );
+
+  // Depth, Time & Safety Stops (string-backed for effortless typing without spin arrows)
+  const [maxDepthInput, setMaxDepthInput] = useState('22');
+  const [avgDepthInput, setAvgDepthInput] = useState('15');
+  const [bottomTimeInput, setBottomTimeInput] = useState('55');
+
+  // Decompression / Safety Stop tick-box + 1..5 counter (defaults to 1 when ticked)
+  const [hasSafetyStop, setHasSafetyStop] = useState(true);
+  const [safetyStopsCount, setSafetyStopsCount] = useState<number>(1);
+
+  // Water Conditions: Salt vs Fresh, Current, Water Temp, Visibility
+  const [waterType, setWaterType] = useState<'Salt' | 'Fresh'>(
+    latestDive.waterType || 'Salt'
+  );
+  const [current, setCurrent] = useState<DiveRecord['current']>('Mild');
+  const [waterTempInput, setWaterTempInput] = useState('26');
+  const [visibilityInput, setVisibilityInput] = useState('20');
+
+  // Breathing Gas ('Air' vs 'Nitrox' with accurate decimal text input + 32% / 36% shortcuts)
+  const [gasType, setGasType] = useState<'Air' | 'Nitrox'>(
+    latestDive.o2Percent > 21 ? 'Nitrox' : 'Air'
+  );
+  const [nitroxO2Input, setNitroxO2Input] = useState<string>(
+    latestDive.o2Percent > 21 ? String(latestDive.o2Percent) : '32'
+  );
+
+  const [startPressureInput, setStartPressureInput] = useState('200');
+  const [endPressureInput, setEndPressureInput] = useState('55');
+  const [tankVolumeL] = useState(12);
+
+  // Buddies & Gear
   const [sameBuddiesAsLast, setSameBuddiesAsLast] = useState(true);
-  const [selectedBuddies, setSelectedBuddies] = useState<string[]>(latestDive.buddies);
-  const [diveGuide, setDiveGuide] = useState(latestDive.diveGuide);
+  const [selectedBuddies, setSelectedBuddies] = useState<string[]>(
+    initialMatchedTrip && initialMatchedTrip.buddies.length > 0
+      ? initialMatchedTrip.buddies
+      : latestDive.buddies
+  );
+  const [diveGuide] = useState(latestDive.diveGuide);
   const [customBuddyInput, setCustomBuddyInput] = useState('');
 
   const [sameGearAsLast, setSameGearAsLast] = useState(true);
-  const [selectedGear, setSelectedGear] = useState<string[]>(latestDive.gearUsed);
-
-  // Notes & Smart Auto-Tag Critters Scanner
-  const [notes, setNotes] = useState(SAMPLE_SCANNER_NOTES[0]);
-  const [spottedCritters, setSpottedCritters] = useState<SpottedCritter[]>(() =>
-    scanNotesForCritters(SAMPLE_SCANNER_NOTES[0], allSpecies)
+  const [selectedGear, setSelectedGear] = useState<string[]>(
+    initialMatchedTrip &&
+      initialMatchedTrip.gearBrought &&
+      initialMatchedTrip.gearBrought.length > 0
+      ? initialMatchedTrip.gearBrought
+      : latestDive.gearUsed
   );
-  const [manualSpeciesId, setManualSpeciesId] = useState(allSpecies[0]?.id || '');
 
-  // Optional Uploaded Cover Photo for WebP Vault
+  // Notes & Marine Life
+  const [notes, setNotes] = useState('');
+  const [spottedCritters, setSpottedCritters] = useState<SpottedCritter[]>([]);
+  const [manualSpeciesId, setManualSpeciesId] = useState(
+    allSpecies[0]?.id || ''
+  );
+  const [customCritterName, setCustomCritterName] = useState('');
+  const [customCritterFamily, setCustomCritterFamily] =
+    useState<CritterFamilyId>('cuttlefish');
+
+  // Optional Uploaded Cover Photo
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Live Calculators: Nitrox MOD (1.4 ppO2) + EAD + SAC/RMV
-  const mod14Meters = useMemo(() => calculateModMeters(o2Percent, 1.4), [o2Percent]);
-  const mod16Meters = useMemo(() => calculateModMeters(o2Percent, 1.6), [o2Percent]);
-  const eadMeters = useMemo(
-    () => calculateEadMeters(maxDepthM, o2Percent),
-    [maxDepthM, o2Percent]
-  );
-  const sacRmv = useMemo(
-    () =>
-      calculateSacAndRmv(
-        avgDepthM,
-        bottomTimeMin,
-        startPressureBar,
-        endPressureBar,
-        tankVolumeL
-      ),
-    [avgDepthM, bottomTimeMin, startPressureBar, endPressureBar, tankVolumeL]
+  const activeTrip = trips.find((t) => t.id === selectedTripId);
+
+  // Parsed numeric values for display & submission
+  const maxDepthM = Math.max(0, parseFloat(maxDepthInput) || 0);
+  const avgDepthM = Math.max(0, parseFloat(avgDepthInput) || 0);
+  const bottomTimeMin = Math.max(1, Math.round(parseFloat(bottomTimeInput) || 0));
+  const waterTempC = parseFloat(waterTempInput) || 26;
+  const visibilityM = Math.max(0, parseFloat(visibilityInput) || 0);
+  const startPressureBar = Math.max(0, Math.round(parseFloat(startPressureInput) || 0));
+  const endPressureBar = Math.max(0, Math.round(parseFloat(endPressureInput) || 0));
+  const parsedNitroxO2 = Math.min(
+    100,
+    Math.max(21, Math.round((parseFloat(nitroxO2Input) || 32) * 10) / 10)
   );
 
-  const isModExceeded = maxDepthM > mod14Meters;
+  // When the user changes the Dive Date, automatically check if it falls in a Trip date range
+  const handleDateChange = (newDate: string) => {
+    setDate(newDate);
+    const matchedTrip = findMatchingTripForDate(newDate, trips);
+    if (matchedTrip) {
+      setSelectedTripId(matchedTrip.id);
+      setWasAutoMatched(true);
+      if (!subLocation.trim()) {
+        setSubLocation(matchedTrip.destination);
+      }
+      if (matchedTrip.buddies && matchedTrip.buddies.length > 0) {
+        setSelectedBuddies(matchedTrip.buddies);
+      }
+      if (matchedTrip.gearBrought && matchedTrip.gearBrought.length > 0) {
+        setSelectedGear(matchedTrip.gearBrought);
+      }
+    } else {
+      setSelectedTripId('');
+      setWasAutoMatched(false);
+    }
+  };
+
+  const handleToggleNewTripBuddy = (buddy: string) => {
+    setNewTripBuddies((prev) =>
+      prev.includes(buddy) ? prev.filter((b) => b !== buddy) : [...prev, buddy]
+    );
+  };
+
+  const handleAddNewTripCustomBuddy = () => {
+    const trimmed = newTripCustomBuddy.trim();
+    if (!trimmed) return;
+    if (!newTripBuddies.includes(trimmed)) {
+      setNewTripBuddies((prev) => [...prev, trimmed]);
+    }
+    if (onAddBuddyToPool) {
+      onAddBuddyToPool(trimmed);
+    }
+    setNewTripCustomBuddy('');
+  };
+
+  const handleToggleNewTripGear = (item: string) => {
+    setNewTripGear((prev) =>
+      prev.includes(item) ? prev.filter((g) => g !== item) : [...prev, item]
+    );
+  };
+
+  const handleConfirmCreateTrip = () => {
+    const dest = newTripDestination.trim();
+    if (!dest || !newTripStart || !newTripEnd) return;
+    const created = onCreateTrip(
+      dest,
+      newTripStart,
+      newTripEnd,
+      newTripBuddies,
+      newTripGear
+    );
+    setSelectedTripId(created.id);
+    setWasAutoMatched(true);
+    setSubLocation(created.destination);
+    if (newTripBuddies.length > 0) {
+      setSelectedBuddies(newTripBuddies);
+    }
+    if (newTripGear.length > 0) {
+      setSelectedGear(newTripGear);
+    }
+    if (date < newTripStart || date > newTripEnd) {
+      setDate(newTripStart);
+    }
+    setIsCreatingTrip(false);
+  };
+
+  const handleToggleSafetyStop = () => {
+    setHasSafetyStop((prev) => {
+      const next = !prev;
+      if (next && safetyStopsCount < 1) {
+        setSafetyStopsCount(1);
+      }
+      return next;
+    });
+  };
 
   const handleToggleSameBuddies = () => {
     const next = !sameBuddiesAsLast;
     setSameBuddiesAsLast(next);
     if (next) {
       setSelectedBuddies(latestDive.buddies);
-      setDiveGuide(latestDive.diveGuide);
     }
   };
 
@@ -139,11 +290,30 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
     );
   };
 
+  const handleDeleteBuddy = (buddy: string) => {
+    setSelectedBuddies((prev) => prev.filter((b) => b !== buddy));
+    if (activeTrip && onUpdateTripBuddies && activeTrip.buddies.includes(buddy)) {
+      onUpdateTripBuddies(
+        activeTrip.id,
+        activeTrip.buddies.filter((b) => b !== buddy)
+      );
+    }
+    if (onRemoveBuddyFromPool) {
+      onRemoveBuddyFromPool(buddy);
+    }
+  };
+
   const handleAddCustomBuddy = () => {
     const trimmed = customBuddyInput.trim();
     if (!trimmed) return;
     if (!selectedBuddies.includes(trimmed)) {
       setSelectedBuddies((prev) => [...prev, trimmed]);
+    }
+    if (onAddBuddyToPool) {
+      onAddBuddyToPool(trimmed);
+    }
+    if (activeTrip && onUpdateTripBuddies && !activeTrip.buddies.includes(trimmed)) {
+      onUpdateTripBuddies(activeTrip.id, [...activeTrip.buddies, trimmed]);
     }
     setCustomBuddyInput('');
     setSameBuddiesAsLast(false);
@@ -166,66 +336,81 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
 
   const handleNotesChange = (text: string) => {
     setNotes(text);
-    // Live auto-tag critters from notes
     const scanned = scanNotesForCritters(text, allSpecies);
     if (scanned.length > 0) {
       setSpottedCritters(scanned);
     }
   };
 
-  const handleAdjustCritterCount = (speciesId: string, delta: number) => {
+  const handleRemoveCritter = (speciesId: string) => {
     setSpottedCritters((prev) =>
-      prev
-        .map((c) =>
-          c.speciesId === speciesId ? { ...c, count: c.count + delta } : c
-        )
-        .filter((c) => c.count > 0)
+      prev.filter((c) => c.speciesId !== speciesId)
     );
   };
 
   const handleAddManualCritter = () => {
     if (!manualSpeciesId) return;
     setSpottedCritters((prev) => {
-      const existing = prev.find((c) => c.speciesId === manualSpeciesId);
-      if (existing) {
-        return prev.map((c) =>
-          c.speciesId === manualSpeciesId ? { ...c, count: c.count + 1 } : c
-        );
+      if (prev.some((c) => c.speciesId === manualSpeciesId)) {
+        return prev;
       }
       return [...prev, { speciesId: manualSpeciesId, count: 1, highlight: true }];
     });
+  };
+
+  const handleAddCustomCritter = () => {
+    const cleanName = customCritterName.trim();
+    if (!cleanName || !onCreateSpecies) return;
+    const created = onCreateSpecies(cleanName, customCritterFamily);
+    setSpottedCritters((prev) => {
+      if (prev.some((c) => c.speciesId === created.id)) {
+        return prev;
+      }
+      return [...prev, { speciesId: created.id, count: 1, highlight: true }];
+    });
+    setCustomCritterName('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const gasMixLabel = o2Percent === 21 ? 'Air 21%' : `EANx${o2Percent}`;
+      const effectiveO2 = gasType === 'Air' ? 21 : parsedNitroxO2;
+      const gasMixLabel =
+        gasType === 'Air' ? 'Air' : `Nitrox ${parsedNitroxO2}%`;
+      const effectiveLocation =
+        subLocation.trim() || (activeTrip ? activeTrip.destination : 'Single Dive');
+      const effectiveSafetyStops = hasSafetyStop ? safetyStopsCount : 0;
+
       await onSaveNewDive(
         {
           diveNumber: nextDiveNumber,
-          siteName: siteName.trim() || `Bali Safari Dive #${nextDiveNumber}`,
-          subLocation: subLocation.trim() || 'East Bali',
-          operator,
+          tripId: selectedTripId || undefined,
+          siteName: siteName.trim() || `Dive #${nextDiveNumber}`,
+          subLocation: effectiveLocation,
+          operator: activeTrip ? activeTrip.destination : 'Single Dive',
           date,
           timeIn,
           maxDepthM,
           avgDepthM,
           bottomTimeMin,
-          safetyStopMin,
+          safetyStopMin: effectiveSafetyStops * 3,
+          safetyStopsCount: effectiveSafetyStops,
           startPressureBar,
           endPressureBar,
           tankVolumeL,
           gasMix: gasMixLabel,
-          o2Percent,
+          o2Percent: effectiveO2,
           waterTempC,
           visibilityM,
-          entryType,
+          diveType,
+          dayNight,
+          waterType,
           current,
           buddies: selectedBuddies.length > 0 ? selectedBuddies : ['Solo / Guide'],
           diveGuide,
           gearUsed: selectedGear,
-          notes,
+          notes: notes.trim() || 'Logged dive.',
           critters: spottedCritters,
           computerModel: 'Shearwater Peregrine TX',
         },
@@ -236,511 +421,979 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
     }
   };
 
-  const allAvailableBuddies = Array.from(
-    new Set([...buddyPool, ...latestDive.buddies, ...selectedBuddies])
+  const tripBuddies = activeTrip?.buddies || [];
+  const otherBuddies = Array.from(
+    new Set([...buddyPool, ...selectedBuddies])
+  ).filter((b) => !tripBuddies.includes(b));
+
+  const allPoolForNewTrip = Array.from(
+    new Set([...buddyPool, ...latestDive.buddies, ...newTripBuddies])
   );
-  const allAvailableGear = Array.from(
-    new Set([...gearLocker, ...latestDive.gearUsed, ...selectedGear])
+
+  const hasTripPackedGear = Boolean(
+    activeTrip && activeTrip.gearBrought && activeTrip.gearBrought.length > 0
   );
+  const tripPackedGearSet = new Set(activeTrip?.gearBrought || []);
+
+  const visibleGearCategories = gearCategories
+    .map((cat) => ({
+      ...cat,
+      items:
+        hasTripPackedGear && !showFullLockerOnTrip
+          ? cat.items.filter((item) => tripPackedGearSet.has(item))
+          : cat.items,
+    }))
+    .filter((cat) => cat.items.length > 0);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 pb-4">
-      {/* 1. HEADER & SITE SELECTION */}
-      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-2.5">
-        <div className="flex items-center justify-between">
+      {/* 1. DIVE, TRIP & SITE */}
+      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-3">
+        {/* Top Row: Dive #223 + Create a Trip Button */}
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-md bg-zinc-950 text-white text-xs font-bold">
-              DIVE #{nextDiveNumber}
+            <span className="px-2.5 py-1 rounded-lg bg-zinc-950 text-white text-xs font-bold">
+              Dive #{nextDiveNumber}
             </span>
-            <span className="text-[11px] text-zinc-500 font-medium">
-              {operator}
-            </span>
+            {activeTrip ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-800 border border-zinc-200 text-xs font-semibold">
+                <Folder className="w-3 h-3 text-zinc-600" />
+                {formatTripTitle(activeTrip)}
+              </span>
+            ) : (
+              <span className="text-xs text-zinc-500 font-medium">
+                Single Dive
+              </span>
+            )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsCreatingTrip((prev) => !prev)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold transition-colors"
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+            <span>{isCreatingTrip ? 'Cancel' : 'Create a Trip'}</span>
+          </button>
         </div>
 
-        {/* Quick Site Presets */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-          {BALI_SITE_PRESETS.map((preset) => {
-            const active = siteName === preset.site;
-            return (
+        {/* Inline "Create a Trip" Drawer */}
+        {isCreatingTrip && (
+          <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-zinc-900">
+                New Trip Folder
+              </span>
               <button
-                key={preset.site}
                 type="button"
-                onClick={() => {
-                  setSiteName(preset.site);
-                  setSubLocation(preset.sub);
-                }}
-                className={`px-2 py-1 rounded-lg text-[10px] font-semibold shrink-0 border transition-all ${
-                  active
-                    ? 'bg-zinc-950 text-white border-zinc-950'
-                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:text-zinc-950'
-                }`}
+                onClick={() => setIsCreatingTrip(false)}
+                className="text-zinc-400 hover:text-zinc-800"
               >
-                {preset.site.split(' ')[0]} {preset.site.split(' ')[1]}
+                <X className="w-4 h-4" />
               </button>
-            );
-          })}
+            </div>
+
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+                Destination (e.g. Bali, Raja Ampat, Cairns, Phuket)
+              </label>
+              <input
+                type="text"
+                value={newTripDestination}
+                onChange={(e) => setNewTripDestination(e.target.value)}
+                placeholder="e.g. Bali"
+                className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-zinc-200 text-xs font-semibold text-zinc-950 outline-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={newTripStart}
+                  onChange={(e) => setNewTripStart(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg bg-white border border-zinc-200 text-xs text-zinc-900 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={newTripEnd}
+                  onChange={(e) => setNewTripEnd(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg bg-white border border-zinc-200 text-xs text-zinc-900 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">
+                Trip Dive Buddies
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {allPoolForNewTrip.map((b) => {
+                  const selected = newTripBuddies.includes(b);
+                  return (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => handleToggleNewTripBuddy(b)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                        selected
+                          ? 'bg-zinc-950 text-white border-zinc-950'
+                          : 'bg-white text-zinc-600 border-zinc-200'
+                      }`}
+                    >
+                      {selected && <Check className="w-3 h-3" />}
+                      <span>{b}</span>
+                    </button>
+                  );
+                })}
+
+                <div className="inline-flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={newTripCustomBuddy}
+                    onChange={(e) => setNewTripCustomBuddy(e.target.value)}
+                    placeholder="+ Add trip buddy"
+                    className="w-32 px-2.5 py-1 rounded-lg bg-white border border-zinc-200 text-xs text-zinc-900 outline-none"
+                  />
+                  {newTripCustomBuddy.trim() && (
+                    <button
+                      type="button"
+                      onClick={handleAddNewTripCustomBuddy}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-900 text-white text-xs font-bold"
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {gearCategories.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-zinc-200">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-500">
+                    Trip Gear: {newTripGear.length} Selected
+                  </label>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    Only selected gear will show when logging dives on this trip
+                  </p>
+                </div>
+
+                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                  {gearCategories
+                    .filter((cat) => cat.items.length > 0)
+                    .map((cat) => (
+                      <div key={cat.id} className="space-y-1">
+                        <div className="text-[10px] font-bold text-zinc-600">
+                          {cat.name}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {cat.items.map((item) => {
+                            const selected = newTripGear.includes(item);
+                            return (
+                              <button
+                                key={item}
+                                type="button"
+                                onClick={() => handleToggleNewTripGear(item)}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all ${
+                                  selected
+                                    ? 'bg-zinc-950 text-white border-zinc-950'
+                                    : 'bg-white text-zinc-600 border-zinc-200'
+                                }`}
+                              >
+                                {selected && <Check className="w-3 h-3" />}
+                                <span>{item}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-zinc-500">
+                Preview:{' '}
+                <strong className="text-zinc-900">
+                  {newTripDestination || 'Trip'} {newTripStart.slice(0, 4)} (
+                  {formatTripDateRange(newTripStart, newTripEnd)})
+                </strong>
+              </span>
+              <button
+                type="button"
+                onClick={handleConfirmCreateTrip}
+                className="px-3 py-1.5 rounded-lg bg-zinc-950 text-white text-xs font-bold"
+              >
+                Save Trip
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Trip Assignment Dropdown */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
+              Trip Folder
+            </label>
+            {wasAutoMatched && activeTrip && (
+              <span className="text-[10px] text-zinc-500 font-medium">
+                Auto-matched by dive date
+              </span>
+            )}
+          </div>
+          <select
+            value={selectedTripId}
+            onChange={(e) => {
+              const nextTripId = e.target.value;
+              setSelectedTripId(nextTripId);
+              setWasAutoMatched(false);
+              const chosen = trips.find((t) => t.id === nextTripId);
+              if (chosen) {
+                if (!subLocation.trim()) {
+                  setSubLocation(chosen.destination);
+                }
+                if (chosen.buddies && chosen.buddies.length > 0) {
+                  setSelectedBuddies(chosen.buddies);
+                }
+                if (chosen.gearBrought && chosen.gearBrought.length > 0) {
+                  setSelectedGear(chosen.gearBrought);
+                }
+              }
+            }}
+            className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-xs font-semibold text-zinc-900 outline-none"
+          >
+            <option value="">No Trip (Single Dive)</option>
+            {trips.map((t) => (
+              <option key={t.id} value={t.id}>
+                {formatTripTitle(t)} ({formatTripDateRange(t.startDate, t.endDate)})
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* Dive Site & Location */}
+        <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
-              Dive Site Name
+              Dive Site
             </label>
             <input
               type="text"
               value={siteName}
               onChange={(e) => setSiteName(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 focus:border-zinc-900 focus:bg-white text-xs font-semibold text-zinc-950 outline-none"
+              placeholder="e.g. Flinders Reef"
+              className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 focus:border-zinc-900 focus:bg-white text-xs font-semibold text-zinc-950 placeholder-zinc-400 outline-none"
               required
             />
           </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            <div>
-              <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-2 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs font-mono text-zinc-900 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
-                Time In
-              </label>
-              <input
-                type="time"
-                value={timeIn}
-                onChange={(e) => setTimeIn(e.target.value)}
-                className="w-full px-2 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs font-mono text-zinc-900 outline-none"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* 2. TELEMETRY + LIVE NITROX MOD (1.4 ppO2) & SAC/RMV CALCULATOR */}
-      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-display text-xs font-bold uppercase tracking-wider text-zinc-900">
-            Profile, Gas & Live MOD / SAC
-          </h3>
-          <span className="text-[10px] font-mono text-zinc-500">
-            Active Units: {unitSystem === 'metric' ? 'M / BAR / °C' : 'FT / PSI / °F'}
-          </span>
-        </div>
-
-        {/* 4-Column Compact Inputs */}
-        <div className="grid grid-cols-4 gap-1.5">
-          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2">
-            <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-              Max ({formatDepth(maxDepthM, unitSystem)})
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+              Location / Area
             </label>
             <input
-              type="number"
-              step="0.5"
-              min="3"
-              max="65"
-              value={maxDepthM}
-              onChange={(e) => setMaxDepthM(Number(e.target.value))}
-              className="w-full mt-0.5 bg-transparent font-display text-sm font-bold text-zinc-950 outline-none"
+              type="text"
+              value={subLocation}
+              onChange={(e) => setSubLocation(e.target.value)}
+              placeholder={
+                activeTrip ? `e.g. Tulamben, ${activeTrip.destination}` : 'e.g. Brisbane'
+              }
+              className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 focus:border-zinc-900 focus:bg-white text-xs font-semibold text-zinc-950 placeholder-zinc-400 outline-none"
             />
-            <span className="text-[9px] font-mono text-zinc-400">meters base</span>
-          </div>
-
-          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2">
-            <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-              Avg ({formatDepth(avgDepthM, unitSystem)})
-            </label>
-            <input
-              type="number"
-              step="0.5"
-              min="2"
-              max="50"
-              value={avgDepthM}
-              onChange={(e) => setAvgDepthM(Number(e.target.value))}
-              className="w-full mt-0.5 bg-transparent font-display text-sm font-bold text-zinc-950 outline-none"
-            />
-            <span className="text-[9px] font-mono text-zinc-400">meters base</span>
-          </div>
-
-          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2">
-            <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-              Time (min)
-            </label>
-            <input
-              type="number"
-              min="5"
-              max="180"
-              value={bottomTimeMin}
-              onChange={(e) => setBottomTimeMin(Number(e.target.value))}
-              className="w-full mt-0.5 bg-transparent font-display text-sm font-bold text-zinc-950 outline-none"
-            />
-            <span className="text-[9px] font-mono text-zinc-400">+{safetyStopMin}m stop</span>
-          </div>
-
-          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2">
-            <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-              Temp ({formatTemp(waterTempC, unitSystem)})
-            </label>
-            <input
-              type="number"
-              min="4"
-              max="34"
-              value={waterTempC}
-              onChange={(e) => setWaterTempC(Number(e.target.value))}
-              className="w-full mt-0.5 bg-transparent font-display text-sm font-bold text-zinc-950 outline-none"
-            />
-            <span className="text-[9px] font-mono text-zinc-400">°C base</span>
           </div>
         </div>
 
-        {/* Gas Mix Slider & Pressure Inputs */}
-        <div className="p-2.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-zinc-800">
-              Gas Mix:{' '}
-              <strong className="font-mono text-zinc-950">
-                {o2Percent === 21 ? 'Air (21% O₂)' : `EANx${o2Percent} (${o2Percent}% O₂)`}
-              </strong>
-            </span>
-            <div className="flex items-center gap-1">
-              {[21, 32, 36].map((presetO2) => (
+        {/* Date & Time In */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+              Date
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => handleDateChange(e.target.value)}
+              className="w-full px-2.5 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-900 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+              Time In
+            </label>
+            <input
+              type="time"
+              value={timeIn}
+              onChange={(e) => setTimeIn(e.target.value)}
+              className="w-full px-2.5 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-900 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Compact Entry Type (Boat / Shore) & Day / Night Toggles */}
+        <div className="pt-2 border-t border-zinc-100 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-zinc-500">Entry</span>
+            <div className="inline-flex bg-zinc-100 p-0.5 rounded-lg border border-zinc-200">
+              {(['Boat', 'Shore'] as const).map((type) => (
                 <button
-                  key={presetO2}
+                  key={type}
                   type="button"
-                  onClick={() => setO2Percent(presetO2)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                    o2Percent === presetO2
-                      ? 'bg-zinc-950 text-white border-zinc-950'
-                      : 'bg-white text-zinc-600 border-zinc-200'
+                  onClick={() => setDiveType(type)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                    diveType === type
+                      ? 'bg-zinc-950 text-white shadow-sm'
+                      : 'text-zinc-600 hover:text-zinc-950'
                   }`}
                 >
-                  {presetO2 === 21 ? 'AIR' : `EAN${presetO2}`}
+                  {type}
                 </button>
               ))}
             </div>
           </div>
 
-          <input
-            type="range"
-            min="21"
-            max="40"
-            value={o2Percent}
-            onChange={(e) => setO2Percent(Number(e.target.value))}
-            className="w-full accent-zinc-950 h-1.5 bg-zinc-200 rounded-lg cursor-pointer"
-          />
-
-          <div className="grid grid-cols-3 gap-2 pt-1">
-            <div>
-              <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-                Start ({formatPressure(startPressureBar, unitSystem)})
-              </label>
-              <input
-                type="number"
-                value={startPressureBar}
-                onChange={(e) => setStartPressureBar(Number(e.target.value))}
-                className="w-full mt-0.5 px-2 py-1 rounded bg-white border border-zinc-200 font-mono text-xs font-bold text-zinc-900"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-                End ({formatPressure(endPressureBar, unitSystem)})
-              </label>
-              <input
-                type="number"
-                value={endPressureBar}
-                onChange={(e) => setEndPressureBar(Number(e.target.value))}
-                className="w-full mt-0.5 px-2 py-1 rounded bg-white border border-zinc-200 font-mono text-xs font-bold text-zinc-900"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] uppercase font-semibold text-zinc-400">
-                Entry Type
-              </label>
-              <select
-                value={entryType}
-                onChange={(e) =>
-                  setEntryType(e.target.value as DiveRecord['entryType'])
-                }
-                className="w-full mt-0.5 px-1.5 py-1 rounded bg-white border border-zinc-200 text-[11px] font-semibold text-zinc-900"
-              >
-                <option value="Jukung Outrigger">Jukung</option>
-                <option value="Speedboat Roll">Speedboat</option>
-                <option value="Shore Entry">Shore</option>
-                <option value="Negative Drift">Drift</option>
-              </select>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-zinc-500">Time</span>
+            <div className="inline-flex bg-zinc-100 p-0.5 rounded-lg border border-zinc-200">
+              {(['Day', 'Night'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setDayNight(mode)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                    dayNight === mode
+                      ? 'bg-zinc-950 text-white shadow-sm'
+                      : 'text-zinc-600 hover:text-zinc-950'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Live Calculated MOD (1.4 ppO2), EAD & SAC/RMV Readout Bar */}
-        <div
-          className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 ${
-            isModExceeded
-              ? 'bg-zinc-950 text-white border-zinc-950'
-              : 'bg-zinc-100/80 text-zinc-900 border-zinc-200'
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            <div>
-              <span className="text-[9px] uppercase tracking-wider opacity-70 block font-semibold">
-                MOD (1.4 ppO₂)
-              </span>
-              <span className="font-display text-xs font-bold">
-                {formatDepth(mod14Meters, unitSystem)}{' '}
-                <span className="text-[9px] font-mono opacity-75">
-                  (1.6: {formatDepth(mod16Meters, unitSystem)})
-                </span>
-              </span>
-            </div>
+      {/* 2. DEPTH, TIME & SAFETY STOPS */}
+      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-950 flex items-center gap-1.5">
+          <Gauge className="w-3.5 h-3.5" />
+          <span>Depth, Time & Stops</span>
+        </h3>
 
-            <div className="h-6 w-px bg-zinc-300/60" />
-
-            <div>
-              <span className="text-[9px] uppercase tracking-wider opacity-70 block font-semibold">
-                EAD
-              </span>
-              <span className="font-display text-xs font-bold">
-                {formatDepth(eadMeters, unitSystem)}
-              </span>
-            </div>
-
-            <div className="h-6 w-px bg-zinc-300/60" />
-
-            <div>
-              <span className="text-[9px] uppercase tracking-wider opacity-70 block font-semibold">
-                Live SAC / RMV
-              </span>
-              <span className="font-display text-xs font-bold">
-                {unitSystem === 'metric'
-                  ? `${sacRmv.rmvLitersMin} L/min (${sacRmv.sacBarMin} bar/m)`
-                  : `${sacRmv.rmvCuftMin} cuft/m (${sacRmv.sacPsiMin} psi/m)`}
-              </span>
-            </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5">
+            <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+              Max Depth ({unitSystem === 'metric' ? 'm' : 'ft'})
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={maxDepthInput}
+              onChange={(e) => setMaxDepthInput(e.target.value)}
+              placeholder="22"
+              className="w-full mt-1 bg-transparent text-base font-bold text-zinc-950 outline-none"
+            />
+            <span className="text-[10px] text-zinc-400">
+              {formatDepth(maxDepthM, unitSystem)}
+            </span>
           </div>
 
-          {isModExceeded && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white text-zinc-950 text-[10px] font-mono font-bold">
-              <AlertTriangle className="w-3 h-3" />
-              Exceeds 1.4 MOD!
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5">
+            <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+              Avg Depth ({unitSystem === 'metric' ? 'm' : 'ft'})
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={avgDepthInput}
+              onChange={(e) => setAvgDepthInput(e.target.value)}
+              placeholder="15"
+              className="w-full mt-1 bg-transparent text-base font-bold text-zinc-950 outline-none"
+            />
+            <span className="text-[10px] text-zinc-400">
+              {formatDepth(avgDepthM, unitSystem)}
             </span>
+          </div>
+
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5">
+            <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+              Dive Time (min)
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={bottomTimeInput}
+              onChange={(e) => setBottomTimeInput(e.target.value)}
+              placeholder="55"
+              className="w-full mt-1 bg-transparent text-base font-bold text-zinc-950 outline-none"
+            />
+            <span className="text-[10px] text-zinc-400">Minutes</span>
+          </div>
+        </div>
+
+        {/* Decompression & Safety Stops Tick-Box + 1..5 Rolling Selector */}
+        <div className="p-2.5 rounded-xl bg-zinc-50 border border-zinc-200 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={handleToggleSafetyStop}
+            className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-900 text-left"
+          >
+            {hasSafetyStop ? (
+              <CheckSquare className="w-4 h-4 text-zinc-950 shrink-0" />
+            ) : (
+              <Square className="w-4 h-4 text-zinc-400 shrink-0" />
+            )}
+            <span>Safety / Decompression Stop</span>
+          </button>
+
+          {hasSafetyStop && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] font-semibold text-zinc-400 uppercase">
+                Stops:
+              </span>
+              <div
+                className="inline-flex items-center gap-1 bg-white p-0.5 rounded-lg border border-zinc-200 overflow-x-auto"
+                aria-label="Number of safety stops"
+              >
+                {[1, 2, 3, 4, 5].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setSafetyStopsCount(num)}
+                    className={`w-6 h-6 rounded-md text-xs font-bold flex items-center justify-center transition-all ${
+                      safetyStopsCount === num
+                        ? 'bg-zinc-950 text-white shadow-sm'
+                        : 'text-zinc-500 hover:text-zinc-950'
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {/* 3. 1-TAP "SAME BUDDIES AS LAST DIVE" & GEAR LOCKER TICK-BOXES */}
+      {/* 3. WATER CONDITIONS (SALT / FRESH, CURRENT, TEMP & VISIBILITY) */}
       <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-3">
-        {/* Same Buddies as Last Dive */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <button
-              type="button"
-              onClick={handleToggleSameBuddies}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-950"
-            >
-              {sameBuddiesAsLast ? (
-                <CheckSquare className="w-4 h-4 text-zinc-950" />
-              ) : (
-                <Square className="w-4 h-4 text-zinc-400" />
-              )}
-              <span>Same Buddies & Guide as Dive #{latestDive.diveNumber}</span>
-            </button>
-            <span className="text-[10px] font-mono text-zinc-400">1-Tap Crew</span>
-          </div>
+        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-950 flex items-center gap-1.5">
+          <Droplets className="w-3.5 h-3.5" />
+          <span>Water Conditions</span>
+        </h3>
 
-          <div className="flex flex-wrap gap-1.5">
-            {allAvailableBuddies.map((buddy) => {
-              const checked = selectedBuddies.includes(buddy);
-              return (
+        {/* Row 1: Salt vs Fresh + Current */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+              Water Type
+            </label>
+            <div className="grid grid-cols-2 gap-1 bg-zinc-100 p-0.5 rounded-xl border border-zinc-200">
+              {(['Salt', 'Fresh'] as const).map((type) => (
                 <button
-                  key={buddy}
+                  key={type}
                   type="button"
-                  onClick={() => handleToggleBuddy(buddy)}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all ${
-                    checked
-                      ? 'bg-zinc-950 text-white border-zinc-950'
-                      : 'bg-zinc-50 text-zinc-600 border-zinc-200'
+                  onClick={() => setWaterType(type)}
+                  className={`py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    waterType === type
+                      ? 'bg-zinc-950 text-white shadow-sm'
+                      : 'text-zinc-600 hover:text-zinc-950'
                   }`}
                 >
-                  {checked && <Check className="w-3 h-3" />}
-                  <span>{buddy}</span>
+                  {type}
                 </button>
-              );
-            })}
-
-            <div className="inline-flex items-center gap-1">
-              <input
-                type="text"
-                value={customBuddyInput}
-                onChange={(e) => setCustomBuddyInput(e.target.value)}
-                placeholder="+ Buddy name"
-                className="w-24 px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-200 text-[11px] text-zinc-900 outline-none"
-              />
-              {customBuddyInput.trim() && (
-                <button
-                  type="button"
-                  onClick={handleAddCustomBuddy}
-                  className="px-2 py-1 rounded-lg bg-zinc-900 text-white text-[10px] font-bold"
-                >
-                  Add
-                </button>
-              )}
+              ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+              Current
+            </label>
+            <select
+              value={current}
+              onChange={(e) => setCurrent(e.target.value as DiveRecord['current'])}
+              className="w-full px-2.5 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs font-semibold text-zinc-900 outline-none h-[34px]"
+            >
+              <option value="Calm">Calm / None</option>
+              <option value="Mild">Mild</option>
+              <option value="Medium">Medium</option>
+              <option value="Strong">Strong</option>
+            </select>
           </div>
         </div>
 
-        {/* Gear Locker Tick-Boxes */}
-        <div className="pt-2.5 border-t border-zinc-100">
-          <div className="flex items-center justify-between mb-2">
-            <button
-              type="button"
-              onClick={handleToggleSameGear}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-950"
-            >
-              {sameGearAsLast ? (
-                <CheckSquare className="w-4 h-4 text-zinc-950" />
-              ) : (
-                <Square className="w-4 h-4 text-zinc-400" />
-              )}
-              <span>Gear Locker Tick-Boxes ({selectedGear.length} active)</span>
-            </button>
+        {/* Row 2: Water Temperature & Visibility */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
+            <div>
+              <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+                Water Temp ({unitSystem === 'metric' ? '°C' : '°F'})
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={waterTempInput}
+                onChange={(e) => setWaterTempInput(e.target.value)}
+                placeholder="26"
+                className="w-20 mt-0.5 bg-transparent text-sm font-bold text-zinc-950 outline-none"
+              />
+            </div>
+            <span className="text-[11px] font-semibold text-zinc-400 shrink-0">
+              {formatTemp(waterTempC, unitSystem)}
+            </span>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {allAvailableGear.map((item) => {
-              const checked = selectedGear.includes(item);
-              return (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => handleToggleGearItem(item)}
-                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono border transition-all ${
-                    checked
-                      ? 'bg-zinc-900 text-white border-zinc-900 font-semibold'
-                      : 'bg-zinc-50 text-zinc-500 border-zinc-200'
-                  }`}
-                >
-                  {checked && <Check className="w-2.5 h-2.5" />}
-                  <span>{item}</span>
-                </button>
-              );
-            })}
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
+            <div>
+              <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+                Visibility ({unitSystem === 'metric' ? 'm' : 'ft'})
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={visibilityInput}
+                onChange={(e) => setVisibilityInput(e.target.value)}
+                placeholder="20"
+                className="w-20 mt-0.5 bg-transparent text-sm font-bold text-zinc-950 outline-none"
+              />
+            </div>
+            <span className="text-[11px] font-semibold text-zinc-400 shrink-0">
+              {formatDepth(visibilityM, unitSystem)}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* 4. SMART AUTO-TAG CRITTERS FROM NOTES SCANNER */}
-      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-2.5">
+      {/* 4. BREATHING GAS & TANK */}
+      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <Wand2 className="w-3.5 h-3.5 text-zinc-900" />
-            <h3 className="font-display text-xs font-bold uppercase tracking-wider text-zinc-900">
-              Field Notes & Auto-Tag Critter Scanner
-            </h3>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-950">
+            Breathing Gas & Tank
+          </h3>
+          <div className="inline-flex bg-zinc-100 p-0.5 rounded-xl border border-zinc-200">
+            {(['Air', 'Nitrox'] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setGasType(type)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  gasType === type
+                    ? 'bg-zinc-950 text-white shadow-sm'
+                    : 'text-zinc-600 hover:text-zinc-950'
+                }`}
+              >
+                {type}
+              </button>
+            ))}
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              handleNotesChange(
-                notes === SAMPLE_SCANNER_NOTES[0]
-                  ? SAMPLE_SCANNER_NOTES[1]
-                  : SAMPLE_SCANNER_NOTES[0]
-              )
-            }
-            className="text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-200"
-          >
-            Try Sample Note
-          </button>
         </div>
+
+        {/* Nitrox O2% Accurate Decimal Input + 32% / 36% Shortcuts */}
+        {gasType === 'Nitrox' && (
+          <div className="p-2.5 rounded-xl bg-zinc-50 border border-zinc-200 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-zinc-700">
+                O₂ Mix (%):
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={nitroxO2Input}
+                onChange={(e) => setNitroxO2Input(e.target.value)}
+                placeholder="e.g. 31.6"
+                className="w-20 px-2.5 py-1 rounded-lg bg-white border border-zinc-200 focus:border-zinc-900 text-xs font-bold text-zinc-950 outline-none"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-400 font-semibold uppercase">
+                Presets:
+              </span>
+              {[32, 36].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setNitroxO2Input(String(preset))}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${
+                    Number(nitroxO2Input) === preset
+                      ? 'bg-zinc-950 text-white border-zinc-950'
+                      : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-400'
+                  }`}
+                >
+                  {preset}%
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5">
+            <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+              Start Tank ({formatPressure(startPressureBar, unitSystem)})
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={startPressureInput}
+              onChange={(e) => setStartPressureInput(e.target.value)}
+              placeholder="200"
+              className="w-full mt-1 bg-transparent text-sm font-bold text-zinc-950 outline-none"
+            />
+          </div>
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-2.5">
+            <label className="block text-[10px] uppercase font-semibold text-zinc-400">
+              End Tank ({formatPressure(endPressureBar, unitSystem)})
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={endPressureInput}
+              onChange={(e) => setEndPressureInput(e.target.value)}
+              placeholder="55"
+              className="w-full mt-1 bg-transparent text-sm font-bold text-zinc-950 outline-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 5. DIVE BUDDIES & GEAR */}
+      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-3">
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-950">
+              <Users className="w-4 h-4 text-zinc-900" />
+              <span>
+                {activeTrip
+                  ? `Dive Buddies — ${formatTripTitle(activeTrip)}`
+                  : 'Dive Buddies'}
+              </span>
+            </span>
+
+            <button
+              type="button"
+              onClick={handleToggleSameBuddies}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600 hover:text-zinc-950"
+            >
+              {sameBuddiesAsLast ? (
+                <CheckSquare className="w-3.5 h-3.5 text-zinc-950" />
+              ) : (
+                <Square className="w-3.5 h-3.5 text-zinc-400" />
+              )}
+              <span>Same as Last Dive</span>
+            </button>
+          </div>
+
+          {activeTrip && tripBuddies.length > 0 && (
+            <div className="p-2.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-1.5">
+              <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500">
+                Pick Buddies from {formatTripTitle(activeTrip)}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {tripBuddies.map((buddy) => {
+                  const checked = selectedBuddies.includes(buddy);
+                  return (
+                    <div
+                      key={buddy}
+                      className={`inline-flex items-center rounded-lg border text-xs font-medium transition-all overflow-hidden ${
+                        checked
+                          ? 'bg-zinc-950 text-white border-zinc-950'
+                          : 'bg-white text-zinc-700 border-zinc-200'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBuddy(buddy)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1"
+                      >
+                        {checked && <Check className="w-3 h-3" />}
+                        <span>{buddy}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBuddy(buddy)}
+                        className={`px-1.5 py-1 border-l ${
+                          checked
+                            ? 'border-zinc-800 text-zinc-400 hover:text-white'
+                            : 'border-zinc-200 text-zinc-400 hover:text-zinc-800'
+                        }`}
+                        title={`Delete ${buddy}`}
+                        aria-label={`Delete ${buddy}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            {activeTrip && otherBuddies.length > 0 && (
+              <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
+                Other Saved Buddies
+              </div>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              {(activeTrip ? otherBuddies : Array.from(new Set([...buddyPool, ...selectedBuddies]))).map(
+                (buddy) => {
+                  const checked = selectedBuddies.includes(buddy);
+                  return (
+                    <div
+                      key={buddy}
+                      className={`inline-flex items-center rounded-lg border text-xs font-medium transition-all overflow-hidden ${
+                        checked
+                          ? 'bg-zinc-950 text-white border-zinc-950'
+                          : 'bg-zinc-50 text-zinc-600 border-zinc-200'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBuddy(buddy)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1"
+                      >
+                        {checked && <Check className="w-3 h-3" />}
+                        <span>{buddy}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBuddy(buddy)}
+                        className={`px-1.5 py-1 border-l ${
+                          checked
+                            ? 'border-zinc-800 text-zinc-400 hover:text-white'
+                            : 'border-zinc-200 text-zinc-400 hover:text-zinc-800'
+                        }`}
+                        title={`Delete ${buddy}`}
+                        aria-label={`Delete ${buddy}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                }
+              )}
+
+              <div className="inline-flex items-center gap-1">
+                <input
+                  type="text"
+                  value={customBuddyInput}
+                  onChange={(e) => setCustomBuddyInput(e.target.value)}
+                  placeholder={activeTrip ? '+ Add buddy to trip' : '+ Add buddy'}
+                  className="w-32 px-2.5 py-1 rounded-lg bg-zinc-50 border border-zinc-200 text-xs text-zinc-900 outline-none"
+                />
+                {customBuddyInput.trim() && (
+                  <button
+                    type="button"
+                    onClick={handleAddCustomBuddy}
+                    className="px-2.5 py-1 rounded-lg bg-zinc-900 text-white text-xs font-bold"
+                  >
+                    Add
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-2.5 border-t border-zinc-100 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-950">
+              <Wrench className="w-3.5 h-3.5 text-zinc-900" />
+              <span>
+                {hasTripPackedGear && activeTrip
+                  ? `Trip Gear — ${formatTripTitle(activeTrip)} (${selectedGear.length})`
+                  : `Gear Used (${selectedGear.length})`}
+              </span>
+            </span>
+
+            <div className="flex items-center gap-2.5">
+              {hasTripPackedGear && (
+                <button
+                  type="button"
+                  onClick={() => setShowFullLockerOnTrip((prev) => !prev)}
+                  className="text-[11px] font-semibold text-zinc-500 hover:text-zinc-900 underline underline-offset-2"
+                >
+                  {showFullLockerOnTrip
+                    ? 'Show Trip Gear Only'
+                    : 'Show All Locker Gear'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleToggleSameGear}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600 hover:text-zinc-950"
+              >
+                {sameGearAsLast ? (
+                  <CheckSquare className="w-3.5 h-3.5 text-zinc-950" />
+                ) : (
+                  <Square className="w-3.5 h-3.5 text-zinc-400" />
+                )}
+                <span>Same as Last Dive</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {visibleGearCategories.map((cat) => (
+              <div
+                key={cat.id}
+                className="p-2.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-1.5"
+              >
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500">
+                  {cat.name}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {cat.items.map((item) => {
+                    const checked = selectedGear.includes(item);
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => handleToggleGearItem(item)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] border transition-all ${
+                          checked
+                            ? 'bg-zinc-900 text-white border-zinc-900 font-semibold'
+                            : 'bg-white text-zinc-600 border-zinc-200'
+                        }`}
+                      >
+                        {checked && <Check className="w-3 h-3" />}
+                        <span>{item}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 6. DIVE NOTES & MARINE LIFE */}
+      <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-2.5">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-900">
+          Dive Notes & Marine Life
+        </h3>
 
         <textarea
           rows={3}
           value={notes}
           onChange={(e) => handleNotesChange(e.target.value)}
-          placeholder="Type your dive notes (e.g., 'Spotted 2 hairy frogfish, a wonderpus, and 3 pygmy seahorses')..."
+          placeholder="Write your dive notes (mention any marine life like 'frogfish' or 'turtle' to auto-tag)..."
           className="w-full p-2.5 rounded-xl bg-zinc-50 border border-zinc-200 focus:border-zinc-900 focus:bg-white text-xs text-zinc-800 leading-relaxed outline-none"
         />
 
-        {/* Auto-Tagged Species Pills with SVG Silhouettes */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[10px] text-zinc-500">
-            <span className="inline-flex items-center gap-1 font-semibold text-zinc-700">
-              <Sparkles className="w-3 h-3" />
-              Auto-Tagged from Notes ({spottedCritters.reduce((s, c) => s + c.count, 0)} critters):
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-zinc-500">
+            <span className="font-semibold text-zinc-700">
+              Marine Life Sighted ({spottedCritters.length}):
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5">
-            {spottedCritters.map((item) => {
-              const sp = allSpecies.find((s) => s.id === item.speciesId);
-              if (!sp) return null;
-              return (
-                <div
-                  key={item.speciesId}
-                  className="flex items-center justify-between gap-1.5 p-1.5 rounded-xl bg-zinc-50 border border-zinc-200"
-                >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div className="w-7 h-7 rounded-lg bg-white border border-zinc-200 flex items-center justify-center shrink-0 text-zinc-900">
-                      <CritterSilhouette familyId={sp.familyId} className="w-5 h-5" />
+          {spottedCritters.length > 0 && (
+            <div className="grid grid-cols-2 gap-1.5">
+              {spottedCritters.map((item) => {
+                const sp = allSpecies.find((s) => s.id === item.speciesId);
+                if (!sp) return null;
+                return (
+                  <div
+                    key={item.speciesId}
+                    className="flex items-center justify-between gap-1.5 p-2 rounded-xl bg-zinc-50 border border-zinc-200"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-white border border-zinc-200 flex items-center justify-center shrink-0 text-zinc-900">
+                        <CritterSilhouette familyId={sp.familyId} className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-900 truncate">
+                        {sp.commonName}
+                      </span>
                     </div>
-                    <span className="font-display text-[11px] font-bold text-zinc-900 truncate">
-                      {sp.commonName}
-                    </span>
-                  </div>
 
-                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => handleAdjustCritterCount(item.speciesId, -1)}
-                      className="w-5 h-5 rounded bg-white border border-zinc-200 flex items-center justify-center text-zinc-600 hover:text-zinc-950"
+                      onClick={() => handleRemoveCritter(item.speciesId)}
+                      className="w-5 h-5 rounded bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 hover:text-zinc-900 shrink-0"
+                      aria-label={`Remove ${sp.commonName}`}
                     >
-                      <Minus className="w-2.5 h-2.5" />
-                    </button>
-                    <span className="font-mono text-[10px] font-bold text-zinc-950 w-4 text-center">
-                      {item.count}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleAdjustCritterCount(item.speciesId, 1)}
-                      className="w-5 h-5 rounded bg-white border border-zinc-200 flex items-center justify-center text-zinc-600 hover:text-zinc-950"
-                    >
-                      <Plus className="w-2.5 h-2.5" />
+                      <X className="w-3 h-3" />
                     </button>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
 
-          {/* Manual Species Add Bar */}
           <div className="flex items-center gap-1.5 pt-1">
             <select
               value={manualSpeciesId}
               onChange={(e) => setManualSpeciesId(e.target.value)}
-              className="flex-1 px-2 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 outline-none"
+              className="flex-1 px-2.5 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 outline-none"
             >
               {allSpecies.map((sp) => (
                 <option key={sp.id} value={sp.id}>
-                  + {sp.commonName} ({sp.scientificName})
+                  + {sp.commonName}
                 </option>
               ))}
             </select>
             <button
               type="button"
               onClick={handleAddManualCritter}
-              className="px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold shrink-0"
+              className="px-3 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold shrink-0"
             >
-              Add Critter
+              Add
             </button>
           </div>
+
+          {onCreateSpecies && families.length > 0 && (
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="text"
+                value={customCritterName}
+                onChange={(e) => setCustomCritterName(e.target.value)}
+                placeholder="Or type any common name (e.g. Brown Cuttlefish)..."
+                className="flex-1 px-2.5 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-900 outline-none"
+              />
+              <select
+                value={customCritterFamily}
+                onChange={(e) =>
+                  setCustomCritterFamily(e.target.value as CritterFamilyId)
+                }
+                aria-label="Marine life icon category"
+                className="w-28 px-2 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-700 outline-none"
+              >
+                {families.map((fam) => (
+                  <option key={fam.id} value={fam.id}>
+                    {fam.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleAddCustomCritter}
+                disabled={!customCritterName.trim()}
+                className="px-3 py-2 rounded-xl bg-zinc-950 disabled:bg-zinc-200 disabled:text-zinc-400 text-white text-xs font-semibold shrink-0"
+              >
+                Add
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 5. WEBP PHOTO VAULT ATTACHMENT & SUBMIT */}
+      {/* 7. PHOTO & SAVE */}
       <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm flex items-center justify-between gap-2">
         <div className="min-w-0">
           <input
@@ -753,7 +1406,7 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold"
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold"
           >
             <Upload className="w-3.5 h-3.5" />
             <span className="truncate max-w-[140px]">
@@ -765,9 +1418,9 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
         <button
           type="submit"
           disabled={isSaving}
-          className="px-4 py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-display text-xs font-bold shadow-sm transition-all shrink-0"
+          className="px-5 py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-bold shadow-sm transition-all shrink-0"
         >
-          {isSaving ? 'Saving to Vault...' : `Save Dive #${nextDiveNumber}`}
+          {isSaving ? 'Saving...' : `Save Dive #${nextDiveNumber}`}
         </button>
       </div>
     </form>
