@@ -249,16 +249,13 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
       <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-sm space-y-2.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-md bg-zinc-950 text-white font-mono text-xs font-bold">
-              NEW DIVE #{nextDiveNumber}
+            <span className="px-2 py-0.5 rounded-md bg-zinc-950 text-white text-xs font-bold">
+              DIVE #{nextDiveNumber}
             </span>
             <span className="text-[11px] text-zinc-500 font-medium">
               {operator}
             </span>
           </div>
-          <span className="text-[10px] font-mono text-zinc-400">
-            15-Sec Liveaboard Logger
-          </span>
         </div>
 
         {/* Quick Site Presets */}
@@ -756,17 +753,13 @@ export const LogDiveView: React.FC<LogDiveViewProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 text-xs font-semibold"
           >
             <Upload className="w-3.5 h-3.5" />
             <span className="truncate max-w-[140px]">
-              {uploadedFile ? uploadedFile.name : 'Attach Cover Photo'}
+              {uploadedFile ? uploadedFile.name : 'Add Dive Photo'}
             </span>
           </button>
-          <p className="text-[9px] text-zinc-400 font-mono mt-1 flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-zinc-700" />
-            Auto-shrinks to ~35KB WebP in Directory.Data
-          </p>
         </div>
 
         <button

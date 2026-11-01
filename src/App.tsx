@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Smartphone,
   Tablet,
-  ListFilter,
-  Eye,
   WifiOff,
   BatteryCharging,
   Signal,
+  X,
+  Check,
 } from 'lucide-react';
 import {
   CRITTER_FAMILIES,
@@ -27,7 +27,6 @@ import {
   compressPhotoToWebpVault,
   generateVaultWebpForDive,
 } from './utils/photoVault';
-import { formatDepth } from './utils/units';
 import { TopHeader } from './components/TopHeader';
 import { BottomNav } from './components/BottomNav';
 import { DiveListSidebar } from './components/DiveListSidebar';
@@ -60,15 +59,16 @@ export function App() {
   const [dives, setDives] = useState<DiveRecord[]>(INITIAL_DIVES);
   const [selectedDiveId, setSelectedDiveId] = useState<string>(INITIAL_DIVES[0].id);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [phonePhotosDeleted, setPhonePhotosDeleted] = useState<boolean>(false);
   const [dexFamilyFilter, setDexFamilyFilter] = useState<string>('all');
-  const [vaultToast, setVaultToast] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   const [gearLocker, setGearLocker] = useState<string[]>(DEFAULT_GEAR_LOCKER);
   const [buddyPool, setBuddyPool] = useState<string[]>(DEFAULT_BUDDY_POOL);
 
   const [devicePreviewMode, setDevicePreviewMode] = useState<'mobile' | 'tablet'>('mobile');
-  const [mobileDivesSubView, setMobileDivesSubView] = useState<'inspector' | 'list'>('inspector');
+  // Start on the clean Logbook list; tapping a dive opens its detail view
+  const [mobileDivesSubView, setMobileDivesSubView] = useState<'list' | 'inspector'>('list');
 
   const [vaultPhotos, setVaultPhotos] = useState<Record<string, VaultPhoto>>(() =>
     buildInitialVaultPhotos()
@@ -118,40 +118,18 @@ export function App() {
     });
   }, [dives, searchQuery, speciesMap]);
 
-  const selectedDive = useMemo(
-    () =>
-      dives.find((d) => d.id === selectedDiveId) ||
-      filteredDives[0] ||
-      dives[0],
-    [dives, selectedDiveId, filteredDives]
+  const selectedDiveIndex = useMemo(
+    () => Math.max(0, dives.findIndex((d) => d.id === selectedDiveId)),
+    [dives, selectedDiveId]
   );
 
-  const { totalVaultKB, totalOriginalMB } = useMemo(() => {
-    const list = Object.values(vaultPhotos);
-    const vKB = list.reduce((sum, p) => sum + p.vaultSizeKB, 0);
-    const oMB = list.reduce((sum, p) => sum + p.originalSizeKB, 0) / 1024;
-    return { totalVaultKB: vKB, totalOriginalMB: oMB };
-  }, [vaultPhotos]);
+  const selectedDive = dives[selectedDiveIndex] || dives[0];
 
   useEffect(() => {
-    if (!vaultToast) return;
-    const timer = setTimeout(() => setVaultToast(null), 4500);
+    if (!toastMessage) return;
+    const timer = setTimeout(() => setToastMessage(null), 3500);
     return () => clearTimeout(timer);
-  }, [vaultToast]);
-
-  const handleTogglePhonePhotosDeleted = () => {
-    setPhonePhotosDeleted((prev) => {
-      const next = !prev;
-      if (next) {
-        setVaultToast(
-          'Phone Gallery Wiped! All ~35 KB WebP covers in Directory.Data remain 100% intact.'
-        );
-      } else {
-        setVaultToast('Restored phone gallery original references.');
-      }
-      return next;
-    });
-  };
+  }, [toastMessage]);
 
   const handleUploadPhotoToDive = async (diveId: string, file: File) => {
     const targetDive = dives.find((d) => d.id === diveId);
@@ -162,7 +140,7 @@ export function App() {
     const newVaultPhoto: VaultPhoto = {
       id: newPhotoId,
       diveNumber: targetDive.diveNumber,
-      caption: `${file.name} • ${compressed.vaultSizeKB} KB WebP in Directory.Data`,
+      caption: `${targetDive.siteName} — Dive #${targetDive.diveNumber}`,
       timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
       vaultWebpDataUrl: compressed.webpDataUrl,
       originalPhoneUri: `content://media/external/images/media/${file.name}`,
@@ -190,9 +168,7 @@ export function App() {
       )
     );
 
-    setVaultToast(
-      `Compressed "${file.name}" (${compressed.originalSizeKB} KB → ${compressed.vaultSizeKB} KB WebP)!`
-    );
+    setToastMessage('Photo added to Dive #' + targetDive.diveNumber);
   };
 
   const handleSaveNewDive = async (
@@ -208,7 +184,7 @@ export function App() {
       vaultPhotoEntry = {
         id: photoId,
         diveNumber: newDiveData.diveNumber,
-        caption: `${uploadedFile.name} • ${compressed.vaultSizeKB} KB WebP in Directory.Data`,
+        caption: `${newDiveData.siteName} — Dive #${newDiveData.diveNumber}`,
         timestamp: `${newDiveData.date} ${newDiveData.timeIn}`,
         vaultWebpDataUrl: compressed.webpDataUrl,
         originalPhoneUri: `content://media/external/images/media/${uploadedFile.name}`,
@@ -250,9 +226,7 @@ export function App() {
     setSelectedDiveId(diveId);
     setMobileDivesSubView('inspector');
     setActiveTab('dives');
-    setVaultToast(
-      `Logged Dive #${newDiveData.diveNumber} (${newDiveData.siteName}) with ${newDiveData.critters.reduce((s, c) => s + c.count, 0)} critters!`
-    );
+    setToastMessage(`Logged Dive #${newDiveData.diveNumber} (${newDiveData.siteName})`);
   };
 
   const handleMergeCritterDelta = (
@@ -285,7 +259,7 @@ export function App() {
         };
       })
     );
-    setVaultToast(`Synced ${buddyName}’s QR Critter Delta!`);
+    setToastMessage(`Merged ${buddyName}’s sightings`);
   };
 
   const handleInspectSpeciesInDex = (familyId: string) => {
@@ -368,23 +342,20 @@ export function App() {
           </div>
         </div>
 
-        {/* App Top Header (Pinned above scroll area) */}
+        {/* Clean Top App Header */}
         <TopHeader
-          unitSystem={unitSystem}
-          onToggleUnit={setUnitSystem}
-          phonePhotosDeleted={phonePhotosDeleted}
-          onTogglePhonePhotosDeleted={handleTogglePhonePhotosDeleted}
-          totalVaultKB={totalVaultKB}
-          totalOriginalMB={totalOriginalMB}
+          activeTab={activeTab}
+          latestDiveNumber={dives[0]?.diveNumber || 222}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         {/* Toast Notification */}
-        {vaultToast && (
-          <div className="mx-2.5 mt-2 z-40 bg-zinc-950 text-white px-3 py-2 rounded-xl shadow-md text-[11px] font-medium flex items-center justify-between gap-2 shrink-0">
-            <span>{vaultToast}</span>
+        {toastMessage && (
+          <div className="mx-3 mt-2 z-40 bg-zinc-950 text-white px-3.5 py-2 rounded-xl shadow-md text-xs font-medium flex items-center justify-between gap-2 shrink-0">
+            <span>{toastMessage}</span>
             <button
               type="button"
-              onClick={() => setVaultToast(null)}
+              onClick={() => setToastMessage(null)}
               className="text-zinc-400 hover:text-white text-xs"
             >
               ✕
@@ -392,107 +363,51 @@ export function App() {
           </div>
         )}
 
-        {/* Contained Scrollable App Content Viewport (Never pushes BottomNav off-screen) */}
-        <main className="flex-1 min-h-0 overflow-y-auto px-2.5 pt-2.5 pb-3">
+        {/* Contained Scrollable App Content Viewport */}
+        <main className="flex-1 min-h-0 overflow-y-auto px-3 pt-3 pb-3">
           {activeTab === 'dives' && (
             <>
               {devicePreviewMode === 'mobile' ? (
-                <div className="space-y-2.5">
-                  {/* Compact Mobile Switcher: Swipeable Dive Pills + Searchable List Button */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setMobileDivesSubView(
-                          mobileDivesSubView === 'list' ? 'inspector' : 'list'
-                        )
-                      }
-                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold shrink-0 border transition-all ${
-                        mobileDivesSubView === 'list'
-                          ? 'bg-zinc-950 text-white border-zinc-950'
-                          : 'bg-white text-zinc-900 border-zinc-200 shadow-sm'
-                      }`}
-                    >
-                      {mobileDivesSubView === 'list' ? (
-                        <>
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Inspector</span>
-                        </>
-                      ) : (
-                        <>
-                          <ListFilter className="w-3.5 h-3.5" />
-                          <span>All ({dives.length})</span>
-                        </>
-                      )}
-                    </button>
-
-                    {/* Horizontal Swipeable Dive Pills */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
-                      {dives.map((d) => {
-                        const active = d.id === selectedDive.id;
-                        return (
-                          <button
-                            key={d.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedDiveId(d.id);
-                              setMobileDivesSubView('inspector');
-                            }}
-                            className={`px-2.5 py-1.5 rounded-xl text-[11px] shrink-0 border transition-all flex items-center gap-1 ${
-                              active
-                                ? 'bg-zinc-950 text-white border-zinc-950 font-semibold shadow-sm'
-                                : 'bg-white text-zinc-600 border-zinc-200 hover:text-zinc-950'
-                            }`}
-                          >
-                            <span>#{d.diveNumber}</span>
-                            <span className="text-[10px] truncate max-w-[68px]">
-                              {d.siteName.split(' ')[0]}
-                            </span>
-                            <span
-                              className={`text-[10px] ${
-                                active ? 'text-zinc-300' : 'text-zinc-400'
-                              }`}
-                            >
-                              {formatDepth(d.maxDepthM, unitSystem)}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {mobileDivesSubView === 'list' ? (
-                    <DiveListSidebar
-                      dives={filteredDives}
-                      selectedDiveId={selectedDive.id}
-                      onSelectDive={(id) => {
-                        setSelectedDiveId(id);
-                        setMobileDivesSubView('inspector');
-                      }}
-                      searchQuery={searchQuery}
-                      onSearchChange={setSearchQuery}
-                      unitSystem={unitSystem}
-                    />
-                  ) : (
-                    <DiveInspector
-                      dive={selectedDive}
-                      coverPhoto={coverPhoto}
-                      galleryPhotos={galleryPhotos}
-                      unitSystem={unitSystem}
-                      phonePhotosDeleted={phonePhotosDeleted}
-                      onTogglePhonePhotosDeleted={handleTogglePhonePhotosDeleted}
-                      onUploadPhotoToDive={handleUploadPhotoToDive}
-                      speciesMap={speciesMap}
-                      familyMap={familyMap}
-                      onInspectSpeciesInDex={handleInspectSpeciesInDex}
-                      onOpenDiveListModal={() => setMobileDivesSubView('list')}
-                    />
-                  )}
-                </div>
+                mobileDivesSubView === 'list' ? (
+                  <DiveListSidebar
+                    dives={filteredDives}
+                    selectedDiveId={selectedDive.id}
+                    onSelectDive={(id) => {
+                      setSelectedDiveId(id);
+                      setMobileDivesSubView('inspector');
+                    }}
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    unitSystem={unitSystem}
+                    vaultPhotos={vaultPhotos}
+                  />
+                ) : (
+                  <DiveInspector
+                    dive={selectedDive}
+                    coverPhoto={coverPhoto}
+                    galleryPhotos={galleryPhotos}
+                    unitSystem={unitSystem}
+                    onUploadPhotoToDive={handleUploadPhotoToDive}
+                    speciesMap={speciesMap}
+                    familyMap={familyMap}
+                    onInspectSpeciesInDex={handleInspectSpeciesInDex}
+                    onBackToLogbook={() => setMobileDivesSubView('list')}
+                    onPrevDive={
+                      selectedDiveIndex < dives.length - 1
+                        ? () => setSelectedDiveId(dives[selectedDiveIndex + 1].id)
+                        : undefined
+                    }
+                    onNextDive={
+                      selectedDiveIndex > 0
+                        ? () => setSelectedDiveId(dives[selectedDiveIndex - 1].id)
+                        : undefined
+                    }
+                  />
+                )
               ) : (
                 /* SPLIT TABLET / DECK VIEW */
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
-                  <div className="lg:col-span-4">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                  <div className="lg:col-span-5">
                     <DiveListSidebar
                       dives={filteredDives}
                       selectedDiveId={selectedDive.id}
@@ -500,16 +415,15 @@ export function App() {
                       searchQuery={searchQuery}
                       onSearchChange={setSearchQuery}
                       unitSystem={unitSystem}
+                      vaultPhotos={vaultPhotos}
                     />
                   </div>
-                  <div className="lg:col-span-8">
+                  <div className="lg:col-span-7">
                     <DiveInspector
                       dive={selectedDive}
                       coverPhoto={coverPhoto}
                       galleryPhotos={galleryPhotos}
                       unitSystem={unitSystem}
-                      phonePhotosDeleted={phonePhotosDeleted}
-                      onTogglePhonePhotosDeleted={handleTogglePhonePhotosDeleted}
                       onUploadPhotoToDive={handleUploadPhotoToDive}
                       speciesMap={speciesMap}
                       familyMap={familyMap}
@@ -580,7 +494,12 @@ export function App() {
         {/* Pinned Bottom Navigation Bar */}
         <BottomNav
           activeTab={activeTab}
-          onSelectTab={setActiveTab}
+          onSelectTab={(tab) => {
+            setActiveTab(tab);
+            if (tab === 'dives') {
+              setMobileDivesSubView('list');
+            }
+          }}
           diveCount={dives.length}
           critterSpeciesCount={CRITTER_SPECIES.length}
         />
@@ -588,16 +507,93 @@ export function App() {
         {/* Simulated Samsung One UI 3-Button System Navigation Bar (Desktop preview only) */}
         {devicePreviewMode === 'mobile' && (
           <div className="hidden sm:flex bg-white border-t border-zinc-200 h-10 px-12 items-center justify-between text-zinc-500 select-none shrink-0">
-            {/* Samsung Recents (|||) */}
             <div className="flex gap-0.5">
               <span className="w-0.5 h-3.5 bg-zinc-400 rounded-full" />
               <span className="w-0.5 h-3.5 bg-zinc-400 rounded-full" />
               <span className="w-0.5 h-3.5 bg-zinc-400 rounded-full" />
             </div>
-            {/* Samsung Home (Rounded Square / Circle) */}
             <div className="w-3.5 h-3.5 rounded-[4px] border-[1.8px] border-zinc-400" />
-            {/* Samsung Back (<) */}
             <div className="text-sm font-semibold leading-none text-zinc-400">‹</div>
+          </div>
+        )}
+
+        {/* Settings Sheet (Measurement Units & Preferences) */}
+        {isSettingsOpen && (
+          <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
+            <div className="w-full bg-white rounded-t-3xl border-t border-zinc-200 p-5 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-zinc-950">
+                  Preferences & Units
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-600"
+                  aria-label="Close settings"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                  Measurement System
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUnitSystem('metric')}
+                    className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all ${
+                      unitSystem === 'metric'
+                        ? 'bg-zinc-950 text-white border-zinc-950'
+                        : 'bg-zinc-50 text-zinc-900 border-zinc-200'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-sm font-bold">Metric</div>
+                      <div
+                        className={`text-xs mt-0.5 ${
+                          unitSystem === 'metric' ? 'text-zinc-300' : 'text-zinc-500'
+                        }`}
+                      >
+                        Meters (m) • Bar • Celsius (°C) • Liters
+                      </div>
+                    </div>
+                    {unitSystem === 'metric' && <Check className="w-4 h-4" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setUnitSystem('imperial')}
+                    className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all ${
+                      unitSystem === 'imperial'
+                        ? 'bg-zinc-950 text-white border-zinc-950'
+                        : 'bg-zinc-50 text-zinc-900 border-zinc-200'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-sm font-bold">Imperial</div>
+                      <div
+                        className={`text-xs mt-0.5 ${
+                          unitSystem === 'imperial' ? 'text-zinc-300' : 'text-zinc-500'
+                        }`}
+                      >
+                        Feet (ft) • PSI • Fahrenheit (°F) • Cubic Feet
+                      </div>
+                    </div>
+                    {unitSystem === 'imperial' && <Check className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="w-full py-3 rounded-2xl bg-zinc-900 text-white text-xs font-bold"
+              >
+                Done
+              </button>
+            </div>
           </div>
         )}
       </div>
