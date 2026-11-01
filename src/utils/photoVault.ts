@@ -92,7 +92,7 @@ export async function compressPhotoToWebpVault(
         // Minimalist Leica-style metadata stamp
         ctx.fillStyle = 'rgba(9, 9, 11, 0.55)';
         ctx.fillRect(width - 175, height - 26, 167, 20);
-        ctx.font = '600 10px monospace';
+        ctx.font = '600 10px Inter, sans-serif';
         ctx.fillStyle = '#f4f4f5';
         ctx.fillText('VAULT // Directory.Data WebP', width - 168, height - 12);
 

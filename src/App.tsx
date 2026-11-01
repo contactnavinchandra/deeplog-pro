@@ -144,7 +144,7 @@ export function App() {
       const next = !prev;
       if (next) {
         setVaultToast(
-          'Phone Gallery Wiped! All ~35KB WebP covers in Directory.Data remain 100% intact.'
+          'Phone Gallery Wiped! All ~35 KB WebP covers in Directory.Data remain 100% intact.'
         );
       } else {
         setVaultToast('Restored phone gallery original references.');
@@ -195,7 +195,6 @@ export function App() {
     );
   };
 
-  // Stage 2: Save newly logged dive (#223+) with automatic ~35KB WebP vault photo
   const handleSaveNewDive = async (
     newDiveData: Omit<DiveRecord, 'id' | 'coverPhotoId' | 'photoIds'>,
     uploadedFile?: File | null
@@ -256,7 +255,6 @@ export function App() {
     );
   };
 
-  // Stage 2: 2-Way Critter Delta Sync merger
   const handleMergeCritterDelta = (
     diveId: string,
     incomingCritters: SpottedCritter[],
@@ -287,7 +285,7 @@ export function App() {
         };
       })
     );
-    setVaultToast(`Synced ${buddyName}’s QR Critter Delta!_`);
+    setVaultToast(`Synced ${buddyName}’s QR Critter Delta!`);
   };
 
   const handleInspectSpeciesInDex = (familyId: string) => {
@@ -310,12 +308,12 @@ export function App() {
     .filter(Boolean);
 
   return (
-    <div className="min-h-screen bg-zinc-200/70 text-zinc-900 flex flex-col items-center justify-start sm:py-3 sm:px-4">
+    <div className="h-[100dvh] w-full bg-zinc-200/80 text-zinc-900 flex flex-col items-center justify-start sm:py-2 sm:px-4 overflow-hidden">
       {/* Desktop Preview Frame Switcher Bar */}
-      <div className="hidden sm:flex items-center justify-between gap-4 w-full max-w-[430px] mb-2 px-2">
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-600 font-mono">
+      <div className="hidden sm:flex items-center justify-between gap-4 w-full max-w-[412px] mb-1.5 px-1 shrink-0">
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-600 font-medium">
           <span className="w-2 h-2 rounded-full bg-zinc-900" />
-          <span>Capacitor Mobile Shell</span>
+          <span>Samsung S24 Ultra (412dp)</span>
         </div>
 
         <div className="inline-flex items-center bg-white p-0.5 rounded-lg border border-zinc-300 text-[11px] shadow-sm">
@@ -329,7 +327,7 @@ export function App() {
             }`}
           >
             <Smartphone className="w-3.5 h-3.5" />
-            <span>Phone (420px)</span>
+            <span>S24 Ultra</span>
           </button>
           <button
             type="button"
@@ -341,27 +339,27 @@ export function App() {
             }`}
           >
             <Tablet className="w-3.5 h-3.5" />
-            <span>Split Deck View</span>
+            <span>Split Deck</span>
           </button>
         </div>
       </div>
 
-      {/* Mobile Device Chassis (Crisp White & Zinc Greyscale) */}
+      {/* Samsung Galaxy S24 Ultra Chassis on Desktop / Full Safe-Area Container on Phone */}
       <div
-        className={`w-full flex flex-col bg-zinc-50 transition-all duration-300 relative overflow-hidden ${
+        className={`w-full h-full flex flex-col bg-zinc-50 transition-all duration-300 relative overflow-hidden ${
           devicePreviewMode === 'mobile'
-            ? 'sm:max-w-[428px] sm:h-[860px] sm:rounded-[38px] sm:border-[7px] sm:border-zinc-900 sm:shadow-2xl min-h-screen sm:min-h-0'
-            : 'max-w-[1380px] sm:rounded-3xl sm:border sm:border-zinc-300 sm:shadow-xl min-h-screen sm:min-h-[840px]'
+            ? 'sm:max-w-[412px] sm:h-[892px] sm:rounded-[18px] sm:border-[6px] sm:border-zinc-900 sm:shadow-2xl'
+            : 'max-w-[1380px] sm:rounded-2xl sm:border sm:border-zinc-300 sm:shadow-xl'
         }`}
       >
-        {/* Simulated Mobile OS Status Bar (Visible only on Desktop preview frame) */}
-        <div className="hidden sm:flex bg-white px-5 pt-2 pb-1 items-center justify-between text-[11px] font-mono text-zinc-800 select-none shrink-0">
+        {/* Simulated S24 Ultra Status Bar + Punch-Hole Camera (Desktop preview only) */}
+        <div className="hidden sm:flex bg-white px-4 pt-2 pb-1.5 items-center justify-between text-[11px] font-medium text-zinc-800 select-none shrink-0 border-b border-zinc-100">
           <span className="font-semibold">09:41</span>
           {devicePreviewMode === 'mobile' && (
-            <div className="w-20 h-4 rounded-full bg-zinc-950" />
+            <div className="w-3 h-3 rounded-full bg-zinc-950" title="S24 Ultra Camera Punch-Hole" />
           )}
           <div className="flex items-center gap-2 text-[10px]">
-            <span className="inline-flex items-center gap-1 text-zinc-600 font-sans font-semibold">
+            <span className="inline-flex items-center gap-1 text-zinc-600 font-semibold">
               <WifiOff className="w-3 h-3" />
               Offline
             </span>
@@ -370,7 +368,7 @@ export function App() {
           </div>
         </div>
 
-        {/* App Top Header */}
+        {/* App Top Header (Pinned above scroll area) */}
         <TopHeader
           unitSystem={unitSystem}
           onToggleUnit={setUnitSystem}
@@ -380,22 +378,22 @@ export function App() {
           totalOriginalMB={totalOriginalMB}
         />
 
-        {/* Toast Notification inside Phone Frame */}
+        {/* Toast Notification */}
         {vaultToast && (
-          <div className="mx-2.5 mt-2 z-40 bg-zinc-950 text-white px-3 py-2 rounded-xl shadow-md text-[11px] font-medium flex items-center justify-between gap-2">
-            <span>{vaultToast.replace('_$', '')}</span>
+          <div className="mx-2.5 mt-2 z-40 bg-zinc-950 text-white px-3 py-2 rounded-xl shadow-md text-[11px] font-medium flex items-center justify-between gap-2 shrink-0">
+            <span>{vaultToast}</span>
             <button
               type="button"
               onClick={() => setVaultToast(null)}
-              className="text-zinc-400 hover:text-white text-xs font-mono"
+              className="text-zinc-400 hover:text-white text-xs"
             >
               ✕
             </button>
           </div>
         )}
 
-        {/* Scrollable App Content Viewport */}
-        <main className="flex-1 overflow-y-auto px-2.5 pt-2.5 pb-4">
+        {/* Contained Scrollable App Content Viewport (Never pushes BottomNav off-screen) */}
+        <main className="flex-1 min-h-0 overflow-y-auto px-2.5 pt-2.5 pb-3">
           {activeTab === 'dives' && (
             <>
               {devicePreviewMode === 'mobile' ? (
@@ -440,18 +438,18 @@ export function App() {
                               setSelectedDiveId(d.id);
                               setMobileDivesSubView('inspector');
                             }}
-                            className={`px-2.5 py-1 rounded-xl text-[11px] font-mono shrink-0 border transition-all flex items-center gap-1 ${
+                            className={`px-2.5 py-1.5 rounded-xl text-[11px] shrink-0 border transition-all flex items-center gap-1 ${
                               active
-                                ? 'bg-zinc-950 text-white border-zinc-950 font-bold shadow-sm'
+                                ? 'bg-zinc-950 text-white border-zinc-950 font-semibold shadow-sm'
                                 : 'bg-white text-zinc-600 border-zinc-200 hover:text-zinc-950'
                             }`}
                           >
                             <span>#{d.diveNumber}</span>
-                            <span className="font-sans text-[10px] truncate max-w-[68px]">
+                            <span className="text-[10px] truncate max-w-[68px]">
                               {d.siteName.split(' ')[0]}
                             </span>
                             <span
-                              className={`text-[9px] ${
+                              className={`text-[10px] ${
                                 active ? 'text-zinc-300' : 'text-zinc-400'
                               }`}
                             >
@@ -579,7 +577,7 @@ export function App() {
           )}
         </main>
 
-        {/* Sticky Bottom Navigation Bar inside the Mobile Frame */}
+        {/* Pinned Bottom Navigation Bar */}
         <BottomNav
           activeTab={activeTab}
           onSelectTab={setActiveTab}
@@ -587,10 +585,19 @@ export function App() {
           critterSpeciesCount={CRITTER_SPECIES.length}
         />
 
-        {/* Mobile Home Indicator Bar (Desktop preview frame only) */}
+        {/* Simulated Samsung One UI 3-Button System Navigation Bar (Desktop preview only) */}
         {devicePreviewMode === 'mobile' && (
-          <div className="hidden sm:flex bg-white pb-2 pt-0.5 justify-center shrink-0">
-            <div className="w-32 h-1 rounded-full bg-zinc-300" />
+          <div className="hidden sm:flex bg-white border-t border-zinc-200 h-10 px-12 items-center justify-between text-zinc-500 select-none shrink-0">
+            {/* Samsung Recents (|||) */}
+            <div className="flex gap-0.5">
+              <span className="w-0.5 h-3.5 bg-zinc-400 rounded-full" />
+              <span className="w-0.5 h-3.5 bg-zinc-400 rounded-full" />
+              <span className="w-0.5 h-3.5 bg-zinc-400 rounded-full" />
+            </div>
+            {/* Samsung Home (Rounded Square / Circle) */}
+            <div className="w-3.5 h-3.5 rounded-[4px] border-[1.8px] border-zinc-400" />
+            {/* Samsung Back (<) */}
+            <div className="text-sm font-semibold leading-none text-zinc-400">‹</div>
           </div>
         )}
       </div>

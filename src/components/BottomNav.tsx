@@ -53,9 +53,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   return (
     <nav
       aria-label="Primary bottom navigation"
-      className="sticky bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-lg border-t border-zinc-200 px-1.5 py-1.5 shrink-0"
+      className="z-30 bg-white border-t border-zinc-200 px-2 pt-1.5 shrink-0"
+      style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 10px)' }}
     >
-      <div className="grid grid-cols-5 gap-0.5">
+      <div className="grid grid-cols-5 gap-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -64,17 +65,17 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               key={item.id}
               type="button"
               onClick={() => onSelectTab(item.id)}
-              className={`relative flex flex-col items-center justify-center py-1 px-0.5 rounded-xl transition-all ${
+              className={`relative flex flex-col items-center justify-center min-h-[48px] py-1.5 px-1 rounded-xl transition-all ${
                 isActive
-                  ? 'text-zinc-950 font-semibold'
+                  ? 'text-zinc-950 font-semibold bg-zinc-100/80'
                   : 'text-zinc-400 hover:text-zinc-700'
               }`}
             >
               <div className="relative">
-                <Icon className={`w-4 h-4 ${isActive ? 'stroke-[2.4] text-zinc-950' : 'stroke-[1.7]'}`} />
+                <Icon className={`w-4 h-4 ${isActive ? 'stroke-[2.3] text-zinc-950' : 'stroke-[1.7]'}`} />
                 {item.badge && (
                   <span
-                    className={`absolute -top-1.5 -right-3.5 px-1 rounded-full text-[8px] font-mono font-bold leading-tight ${
+                    className={`absolute -top-1.5 -right-3.5 px-1 rounded-full text-[9px] font-semibold leading-tight ${
                       isActive
                         ? 'bg-zinc-900 text-white'
                         : 'bg-zinc-100 text-zinc-600 border border-zinc-200'
@@ -88,7 +89,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                 {item.label}
               </span>
               {isActive && (
-                <span className="absolute -bottom-0.5 w-4 h-0.5 rounded-full bg-zinc-950" />
+                <span className="absolute bottom-0.5 w-4 h-0.5 rounded-full bg-zinc-950" />
               )}
             </button>
           );
